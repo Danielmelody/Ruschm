@@ -1,6 +1,8 @@
 /target
 **/*.rs.bk
 
+Cargo.lock
+
 # Ignore tags created by etags, ctags, gtags (GNU global) and cscope
 TAGS
 .TAGS
