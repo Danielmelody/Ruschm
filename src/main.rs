@@ -1,4 +1,5 @@
 use std::io::{self, BufRead};
+mod lexer;
 
 fn main() -> io::Result<()> {
     let stdin = io::stdin();
