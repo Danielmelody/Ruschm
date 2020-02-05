@@ -57,19 +57,33 @@ impl Lexer {
             Some(c) => match c {
                 '(' => self.tokens.push(Token::LeftParenthesis),
                 ')' => self.tokens.push(Token::RightParenthesis),
-                '#' => match current_iter.next() {
-                    Some(c) => match c {
-                        '(' => self.tokens.push(Token::SharpParenthesis),
-                        't' => self.tokens.push(Token::Boolean(true)),
-                        'f' => self.tokens.push(Token::Boolean(false)),
-                        _ => {
-                            return Err(InvalidToken {
-                                error: String::from("expect '(' 't' or 'f' after #"),
-                            })
-                        }
-                    },
-                    None => (),
-                },
+                '#' => {
+                    self.current = current_iter.next();
+                    match self.current {
+                        Some(cn) => match cn {
+                            '(' => self.tokens.push(Token::SharpParenthesis),
+                            't' => self.tokens.push(Token::Boolean(true)),
+                            'f' => self.tokens.push(Token::Boolean(false)),
+                            '\\' => {
+                                self.current = current_iter.next();
+                                match self.current {
+                                    Some(cnn) => self.tokens.push(Token::Character(cnn)),
+                                    None => {
+                                        return Err(InvalidToken {
+                                            error: String::from("expect character after #\\"),
+                                        })
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(InvalidToken {
+                                    error: String::from("expect '(' 't' or 'f' after #"),
+                                })
+                            }
+                        },
+                        None => (),
+                    }
+                }
                 '\'' => self.tokens.push(Token::Quote),
                 '`' => self.tokens.push(Token::Quasiquote),
                 ',' => match current_iter.clone().next() {
@@ -182,5 +196,20 @@ fn identifier() -> Result<(), InvalidToken> {
         ]
     );
 
+    Ok(())
+}
+
+#[test]
+fn character() -> Result<(), InvalidToken> {
+    let mut l = Lexer::new();
+    l.tokenize("#\\a#\\ #\\\t")?;
+    assert_eq!(
+        l.tokens,
+        vec![
+            Token::Character('a'),
+            Token::Character(' '),
+            Token::Character('\t')
+        ]
+    );
     Ok(())
 }
