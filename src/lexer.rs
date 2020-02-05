@@ -89,7 +89,54 @@ impl Lexer {
         }
         Ok(())
     }
-    fn identifier(&mut self, mut currentIter: &std::str::Chars) -> Result<(), InvalidToken> {
+
+    fn identifier(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+        fn initial(current: char) -> bool {
+            match current {
+                'a'...'z'
+                | 'A'...'Z'
+                | '!'
+                | '$'
+                | '%'
+                | '&'
+                | '*'
+                | '/'
+                | ':'
+                | '<'
+                | '='
+                | '>'
+                | '?'
+                | '^'
+                | '_'
+                | '~' => true,
+                _ => false,
+            }
+        }
+        if let Some(c) = self.current {
+            match c {
+                '+' => self.tokens.push(Token::Identifier(String::from("+"))),
+                '-' => self.tokens.push(Token::Identifier(String::from("-"))),
+                _ => {
+                    if initial(c) {
+                        let mut identifier_str = String::new();
+                        identifier_str.push(c);
+                        loop {
+                            self.current = current_iter.next();
+                            if let Some(nc) = self.current {
+                                match nc {
+                                    _ if initial(nc) => identifier_str.push(nc),
+                                    '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
+                                    _ => break,
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                        self.tokens.push(Token::Identifier(identifier_str));
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -101,7 +148,6 @@ fn empty_text() {
 }
 
 #[test]
-
 fn simple_tokens() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
     l.tokenize("#t#f()#('`,,@.")?;
@@ -120,5 +166,21 @@ fn simple_tokens() -> Result<(), InvalidToken> {
             Token::Period
         ]
     );
+    Ok(())
+}
+
+#[test]
+fn identifier() -> Result<(), InvalidToken> {
+    let mut l = Lexer::new();
+    l.tokenize("+-xyz123_")?;
+    assert_eq!(
+        l.tokens,
+        vec![
+            Token::Identifier(String::from("+")),
+            Token::Identifier(String::from("-")),
+            Token::Identifier(String::from("xyz123_"))
+        ]
+    );
+
     Ok(())
 }
