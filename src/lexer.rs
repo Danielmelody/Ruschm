@@ -97,7 +97,10 @@ impl Lexer {
                     None => (),
                 },
                 '.' => self.tokens.push(Token::Period),
-                _ => self.identifier(current_iter)?,
+                _ => {
+                    self.identifier(current_iter)?;
+                    self.string(current_iter)?
+                }
             },
             None => (),
         }
@@ -147,6 +150,36 @@ impl Lexer {
                             }
                         }
                         self.tokens.push(Token::Identifier(identifier_str));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn string(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+        if let Some('"') = self.current {
+            let mut string_literal = String::new();
+            loop {
+                self.current = current_iter.next();
+                if let Some(c) = self.current {
+                    match c {
+                        '"' => {
+                            self.tokens.push(Token::String(string_literal));
+                            break;
+                        }
+                        '\\' => {
+                            self.current = current_iter.next();
+                            match self.current {
+                                Some(ec) => string_literal.push(ec),
+                                None => {
+                                    return Err(InvalidToken {
+                                        error: String::from("Incomplete escape character"),
+                                    })
+                                }
+                            }
+                        }
+                        _ => string_literal.push(c),
                     }
                 }
             }
@@ -209,6 +242,20 @@ fn character() -> Result<(), InvalidToken> {
             Token::Character('a'),
             Token::Character(' '),
             Token::Character('\t')
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn string() -> Result<(), InvalidToken>{
+    let mut l = Lexer::new();
+    l.tokenize("\"()+-123\"\"\\\"\"")?;
+    assert_eq!(
+        l.tokens,
+        vec![
+            Token::String(String::from("()+-123")),
+            Token::String(String::from("\"")),
         ]
     );
     Ok(())
