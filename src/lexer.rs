@@ -186,7 +186,25 @@ impl Lexer {
                         '\\' => {
                             self.current = current_iter.next();
                             match self.current {
-                                Some(ec) => string_literal.push(ec),
+                                Some(ec) => {
+                                    match ec {
+                                        'a' => string_literal.push('\u{007}'),
+                                        'b' => string_literal.push('\u{008}'),
+                                        't' => string_literal.push('\u{009}'),
+                                        'n' => string_literal.push('\n'),
+                                        'r' => string_literal.push('\r'),
+                                        '"' => string_literal.push('"'),
+                                        '\\' => string_literal.push('\\'),
+                                        '|' => string_literal.push('|'),
+                                        'x' => (), // TODO: 'x' for hex value
+                                        ' ' => (), // TODO: space for nothing
+                                        _ => {
+                                            return Err(InvalidToken {
+                                                error: String::from("Unknown escape character"),
+                                            })
+                                        }
+                                    }
+                                }
                                 None => {
                                     return Err(InvalidToken {
                                         error: String::from("Incomplete escape character"),
@@ -196,6 +214,8 @@ impl Lexer {
                         }
                         _ => string_literal.push(c),
                     }
+                } else {
+                    return Err(InvalidToken {error: String::from("Unclosed string literal")})
                 }
             }
         }
@@ -268,12 +288,13 @@ fn character() -> Result<(), InvalidToken> {
 #[test]
 fn string() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("\"()+-123\"\"\\\"\"")?;
+    l.tokenize("\"()+-123\"\"\\\"\"\"\\a\\b\\t\\r\\n\\\\\\|\"")?;
     assert_eq!(
         l.tokens,
         vec![
             Token::String(String::from("()+-123")),
             Token::String(String::from("\"")),
+            Token::String(String::from("\u{007}\u{008}\t\r\n\\|"))
         ]
     );
     Ok(())
