@@ -5,12 +5,13 @@ use std::str;
 enum Token {
     Identifier(String),
     Boolean(bool),
-    Number(i64),
+    Number(i64), // exact integers only
     Character(char),
     String(String),
-    LeftParenthesis,
-    RightParenthesis,
-    SharpParenthesis,
+    LeftParen,
+    RightParen,
+    VecConsIntro,
+    ByteVecConsIntro,
     Quote,
     Quasiquote, // BackQuote
     Unquote,
@@ -55,13 +56,13 @@ impl Lexer {
     fn token(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
         match self.current {
             Some(c) => match c {
-                '(' => self.tokens.push(Token::LeftParenthesis),
-                ')' => self.tokens.push(Token::RightParenthesis),
+                '(' => self.tokens.push(Token::LeftParen),
+                ')' => self.tokens.push(Token::RightParen),
                 '#' => {
                     self.current = current_iter.next();
                     match self.current {
                         Some(cn) => match cn {
-                            '(' => self.tokens.push(Token::SharpParenthesis),
+                            '(' => self.tokens.push(Token::VecConsIntro),
                             't' => self.tokens.push(Token::Boolean(true)),
                             'f' => self.tokens.push(Token::Boolean(false)),
                             '\\' => {
@@ -73,6 +74,19 @@ impl Lexer {
                                             error: String::from("expect character after #\\"),
                                         })
                                     }
+                                }
+                            }
+                            'u' => {
+                                if Some('8') == current_iter.next()
+                                    && Some('(') == current_iter.next()
+                                {
+                                    self.tokens.push(Token::ByteVecConsIntro);
+                                } else {
+                                    return Err(InvalidToken {
+                                        error: String::from(
+                                            "Imcomplete bytevector constant introducer",
+                                        ),
+                                    });
                                 }
                             }
                             _ => {
@@ -123,6 +137,7 @@ impl Lexer {
                 | '='
                 | '>'
                 | '?'
+                | '@'
                 | '^'
                 | '_'
                 | '~' => true,
@@ -197,15 +212,18 @@ fn empty_text() {
 #[test]
 fn simple_tokens() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("#t#f()#('`,,@.")?;
+    l.tokenize("#t#f()#()#u8()'`,,@.")?;
     assert_eq!(
         l.tokens,
         vec![
             Token::Boolean(true),
             Token::Boolean(false),
-            Token::LeftParenthesis,
-            Token::RightParenthesis,
-            Token::SharpParenthesis,
+            Token::LeftParen,
+            Token::RightParen,
+            Token::VecConsIntro,
+            Token::RightParen,
+            Token::ByteVecConsIntro,
+            Token::RightParen,
             Token::Quote,
             Token::Quasiquote,
             Token::Comma,
@@ -248,7 +266,7 @@ fn character() -> Result<(), InvalidToken> {
 }
 
 #[test]
-fn string() -> Result<(), InvalidToken>{
+fn string() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
     l.tokenize("\"()+-123\"\"\\\"\"")?;
     assert_eq!(
