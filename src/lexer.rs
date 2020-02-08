@@ -111,10 +111,15 @@ impl Lexer {
                     None => (),
                 },
                 '.' => self.tokens.push(Token::Period),
-                _ => {
-                    self.identifier(current_iter)?;
-                    self.string(current_iter)?
+                '+' | '-' => {
+                    match current_iter.clone().next() {
+                        Some('0'...'9') => self.number(current_iter)?,
+                        _ => self.tokens.push(Token::Identifier(c.to_string())),
+                    };
                 }
+                '"' => self.string(current_iter)?,
+                '0'...'9' => self.number(current_iter)?,
+                _ => self.identifier(current_iter)?,
             },
             None => (),
         }
@@ -145,28 +150,22 @@ impl Lexer {
             }
         }
         if let Some(c) = self.current {
-            match c {
-                '+' => self.tokens.push(Token::Identifier(String::from("+"))),
-                '-' => self.tokens.push(Token::Identifier(String::from("-"))),
-                _ => {
-                    if initial(c) {
-                        let mut identifier_str = String::new();
-                        identifier_str.push(c);
-                        loop {
-                            self.current = current_iter.next();
-                            if let Some(nc) = self.current {
-                                match nc {
-                                    _ if initial(nc) => identifier_str.push(nc),
-                                    '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
-                                    _ => break,
-                                }
-                            } else {
-                                break;
-                            }
+            if initial(c) {
+                let mut identifier_str = String::new();
+                identifier_str.push(c);
+                loop {
+                    self.current = current_iter.next();
+                    if let Some(nc) = self.current {
+                        match nc {
+                            _ if initial(nc) => identifier_str.push(nc),
+                            '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
+                            _ => break,
                         }
-                        self.tokens.push(Token::Identifier(identifier_str));
+                    } else {
+                        break;
                     }
                 }
+                self.tokens.push(Token::Identifier(identifier_str));
             }
         }
         Ok(())
@@ -215,7 +214,38 @@ impl Lexer {
                         _ => string_literal.push(c),
                     }
                 } else {
-                    return Err(InvalidToken {error: String::from("Unclosed string literal")})
+                    return Err(InvalidToken {
+                        error: String::from("Unclosed string literal"),
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn number(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+        if let Some(c) = self.current {
+            let mut number_str = String::new();
+            number_str.push(c);
+            loop {
+                let current_char = current_iter.clone().next();
+                match current_char {
+                    Some(nc) => match nc {
+                        '0'...'9' => {
+                            number_str.push(nc);
+                            self.current = current_iter.next();
+                        }
+                        _ => break,
+                    },
+                    None => break,
+                }
+            }
+            match number_str.parse() {
+                Ok(number) => self.tokens.push(Token::Number(number)),
+                Err(_) => {
+                    return Err(InvalidToken {
+                        error: format!("Unrecognized number: {}", number_str),
+                    })
                 }
             }
         }
@@ -295,6 +325,22 @@ fn string() -> Result<(), InvalidToken> {
             Token::String(String::from("()+-123")),
             Token::String(String::from("\"")),
             Token::String(String::from("\u{007}\u{008}\t\r\n\\|"))
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn number() -> Result<(), InvalidToken> {
+    let mut l = Lexer::new();
+    l.tokenize("+123-123++123")?;
+    assert_eq!(
+        l.tokens,
+        vec![
+            Token::Number(123),
+            Token::Number(-123),
+            Token::Identifier(String::from("+")),
+            Token::Number(123),
         ]
     );
     Ok(())
