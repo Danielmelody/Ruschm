@@ -46,8 +46,8 @@ impl Lexer {
 
     pub fn tokenize(&mut self, input: &str) -> Result<(), InvalidToken> {
         let mut chars = input.chars();
-        while let Some(c) = chars.next() {
-            self.current = Some(c);
+        self.current = chars.next();
+        while let Some(c) = self.current {
             self.token(&mut chars)?;
         }
         Ok(())
@@ -56,19 +56,21 @@ impl Lexer {
     fn token(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
         match self.current {
             Some(c) => match c {
-                '(' => self.tokens.push(Token::LeftParen),
-                ')' => self.tokens.push(Token::RightParen),
+                ' ' | '\t' | '\n' | '\r' => self.atmosphere(current_iter)?,
+                ';' => self.comment(current_iter)?,
+                '(' => self.push_advance(current_iter, Token::LeftParen),
+                ')' => self.push_advance(current_iter, Token::RightParen),
                 '#' => {
                     self.current = current_iter.next();
                     match self.current {
                         Some(cn) => match cn {
-                            '(' => self.tokens.push(Token::VecConsIntro),
-                            't' => self.tokens.push(Token::Boolean(true)),
-                            'f' => self.tokens.push(Token::Boolean(false)),
+                            '(' => self.push_advance(current_iter, Token::VecConsIntro),
+                            't' => self.push_advance(current_iter, Token::Boolean(true)),
+                            'f' => self.push_advance(current_iter, Token::Boolean(false)),
                             '\\' => {
                                 self.current = current_iter.next();
                                 match self.current {
-                                    Some(cnn) => self.tokens.push(Token::Character(cnn)),
+                                    Some(cnn) => self.push_advance(current_iter, Token::Character(cnn)),
                                     None => {
                                         return Err(InvalidToken {
                                             error: String::from("expect character after #\\"),
@@ -80,7 +82,7 @@ impl Lexer {
                                 if Some('8') == current_iter.next()
                                     && Some('(') == current_iter.next()
                                 {
-                                    self.tokens.push(Token::ByteVecConsIntro);
+                                    self.push_advance(current_iter, Token::ByteVecConsIntro);
                                 } else {
                                     return Err(InvalidToken {
                                         error: String::from(
@@ -98,23 +100,26 @@ impl Lexer {
                         None => (),
                     }
                 }
-                '\'' => self.tokens.push(Token::Quote),
-                '`' => self.tokens.push(Token::Quasiquote),
+                '\'' => self.push_advance(current_iter, Token::Quote),
+                '`' => self.push_advance(current_iter, Token::Quasiquote),
                 ',' => match current_iter.clone().next() {
                     Some(nc) => match nc {
                         '@' => {
                             self.current = current_iter.next();
-                            self.tokens.push(Token::CommaAt);
+                            self.push_advance(current_iter, Token::CommaAt);
                         }
-                        _ => self.tokens.push(Token::Comma),
+                        _ => self.push_advance(current_iter, Token::Comma),
                     },
                     None => (),
                 },
-                '.' => self.tokens.push(Token::Period),
+                '.' => match current_iter.clone().next() {
+                    Some('.') => self.identifier(current_iter)?,
+                    _ => self.push_advance(current_iter, Token::Period),
+                },
                 '+' | '-' => {
                     match current_iter.clone().next() {
                         Some('0'...'9') => self.number(current_iter)?,
-                        _ => self.tokens.push(Token::Identifier(c.to_string())),
+                        _ => self.push_advance(current_iter, Token::Identifier(c.to_string())),
                     };
                 }
                 '"' => self.string(current_iter)?,
@@ -122,6 +127,28 @@ impl Lexer {
                 _ => self.identifier(current_iter)?,
             },
             None => (),
+        }
+        Ok(())
+    }
+
+    fn atmosphere(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+        while let Some(c) = self.current {
+            match c {
+                ' ' | '\t' | '\n' | '\r' => (),
+                _ => break,
+            }
+            self.current = current_iter.next();
+        }
+        Ok(())
+    }
+
+    fn comment(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+        while let Some(c) = self.current {
+            match c {
+                '\n' | '\r' => break,
+                _ => ()
+            }
+            self.current = current_iter.next();
         }
         Ok(())
     }
@@ -220,6 +247,7 @@ impl Lexer {
                 }
             }
         }
+        self.current = current_iter.next();
         Ok(())
     }
 
@@ -228,12 +256,11 @@ impl Lexer {
             let mut number_str = String::new();
             number_str.push(c);
             loop {
-                let current_char = current_iter.clone().next();
-                match current_char {
+                self.current = current_iter.next();
+                match self.current {
                     Some(nc) => match nc {
                         '0'...'9' => {
                             number_str.push(nc);
-                            self.current = current_iter.next();
                         }
                         _ => break,
                     },
@@ -250,6 +277,11 @@ impl Lexer {
             }
         }
         Ok(())
+    }
+
+    fn push_advance(&mut self, current_iter:&mut std::str::Chars, token: Token) {
+        self.tokens.push(token);
+        self.current = current_iter.next();
     }
 }
 
@@ -342,6 +374,39 @@ fn number() -> Result<(), InvalidToken> {
             Token::Identifier(String::from("+")),
             Token::Number(123),
         ]
+    );
+    Ok(())
+}
+
+#[test]
+
+fn atmosphere() -> Result<(), InvalidToken> {
+    let mut l = Lexer::new();
+    l.tokenize("\t(- \n4\r(+ 1 2))")?;
+    assert_eq!(
+        l.tokens,
+        vec![
+            Token::LeftParen,
+            Token::Identifier(String::from("-")),
+            Token::Number(4),
+            Token::LeftParen,
+            Token::Identifier(String::from("+")),
+            Token::Number(1),
+            Token::Number(2),
+            Token::RightParen,
+            Token::RightParen
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn comment() -> Result<(), InvalidToken> {
+    let mut l = Lexer::new();
+    l.tokenize("abcd;+-12\t 12")?;
+    assert_eq!(
+        l.tokens,
+        vec![Token::Identifier(String::from("abcd"))]
     );
     Ok(())
 }
