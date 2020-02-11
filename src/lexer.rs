@@ -70,7 +70,9 @@ impl Lexer {
                             '\\' => {
                                 self.current = current_iter.next();
                                 match self.current {
-                                    Some(cnn) => self.push_advance(current_iter, Token::Character(cnn)),
+                                    Some(cnn) => {
+                                        self.push_advance(current_iter, Token::Character(cnn))
+                                    }
                                     None => {
                                         return Err(InvalidToken {
                                             error: String::from("expect character after #\\"),
@@ -119,7 +121,11 @@ impl Lexer {
                 '+' | '-' => {
                     match current_iter.clone().next() {
                         Some('0'...'9') => self.number(current_iter)?,
-                        _ => self.push_advance(current_iter, Token::Identifier(c.to_string())),
+                        Some(nc) => {
+                            self.test_delimiter(nc)?;
+                            self.push_advance(current_iter, Token::Identifier(c.to_string()));
+                        }
+                        None => self.push_advance(current_iter, Token::Identifier(c.to_string())),
                     };
                 }
                 '"' => self.string(current_iter)?,
@@ -146,7 +152,7 @@ impl Lexer {
         while let Some(c) = self.current {
             match c {
                 '\n' | '\r' => break,
-                _ => ()
+                _ => (),
             }
             self.current = current_iter.next();
         }
@@ -186,7 +192,10 @@ impl Lexer {
                         match nc {
                             _ if initial(nc) => identifier_str.push(nc),
                             '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
-                            _ => break,
+                            _ => {
+                                self.test_delimiter(nc)?;
+                                break;
+                            }
                         }
                     } else {
                         break;
@@ -262,7 +271,10 @@ impl Lexer {
                         '0'...'9' => {
                             number_str.push(nc);
                         }
-                        _ => break,
+                        _ => {
+                            self.test_delimiter(nc)?;
+                            break;
+                        }
                     },
                     None => break,
                 }
@@ -279,9 +291,18 @@ impl Lexer {
         Ok(())
     }
 
-    fn push_advance(&mut self, current_iter:&mut std::str::Chars, token: Token) {
+    fn push_advance(&mut self, current_iter: &mut std::str::Chars, token: Token) {
         self.tokens.push(token);
         self.current = current_iter.next();
+    }
+
+    fn test_delimiter(&mut self, c: char) -> Result<(), InvalidToken> {
+        match c {
+            ' ' | '\t' | '\n' | '\r' | '(' | ')' | '"' | ';' | '|' => Ok(()),
+            _ => Err(InvalidToken {
+                error: format!("Expect delimiter here instead of {}", c),
+            }),
+        }
     }
 }
 
@@ -365,7 +386,7 @@ fn string() -> Result<(), InvalidToken> {
 #[test]
 fn number() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("+123-123++123")?;
+    l.tokenize("+123 -123 + +123")?;
     assert_eq!(
         l.tokens,
         vec![
@@ -404,9 +425,6 @@ fn atmosphere() -> Result<(), InvalidToken> {
 fn comment() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
     l.tokenize("abcd;+-12\t 12")?;
-    assert_eq!(
-        l.tokens,
-        vec![Token::Identifier(String::from("abcd"))]
-    );
+    assert_eq!(l.tokens, vec![Token::Identifier(String::from("abcd"))]);
     Ok(())
 }
