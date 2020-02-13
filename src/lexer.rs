@@ -340,7 +340,7 @@ fn simple_tokens() -> Result<(), InvalidToken> {
 #[test]
 fn identifier() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("+-xyz123_")?;
+    l.tokenize("+ - xyz123_")?;
     assert_eq!(
         l.tokens,
         vec![
