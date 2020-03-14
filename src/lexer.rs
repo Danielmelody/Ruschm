@@ -11,13 +11,12 @@ enum Token {
     String(String),
     LeftParen,
     RightParen,
-    VecConsIntro,
-    ByteVecConsIntro,
-    Quote,
+    VecConsIntro, // #(...)
+    ByteVecConsIntro, // #u8(...)
+    Quote, // '
     Quasiquote, // BackQuote
-    Unquote,
-    Comma,
-    CommaAt,
+    Unquote, // ,
+    UnquoteSplicing, // ,@
     Period,
 }
 
@@ -103,9 +102,9 @@ impl Lexer {
                     Some(nc) => match nc {
                         '@' => {
                             self.current = current_iter.next();
-                            self.push_advance(current_iter, Token::CommaAt);
+                            self.push_advance(current_iter, Token::UnquoteSplicing);
                         }
-                        _ => self.push_advance(current_iter, Token::Comma),
+                        _ => self.push_advance(current_iter, Token::Unquote),
                     },
                     None => (),
                 },
@@ -385,8 +384,8 @@ fn simple_tokens() -> Result<(), InvalidToken> {
             Token::RightParen,
             Token::Quote,
             Token::Quasiquote,
-            Token::Comma,
-            Token::CommaAt,
+            Token::Unquote,
+            Token::UnquoteSplicing,
             Token::Period
         ]
     );
