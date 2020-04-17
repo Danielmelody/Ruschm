@@ -11,12 +11,12 @@ enum Token {
     String(String),
     LeftParen,
     RightParen,
-    VecConsIntro, // #(...)
+    VecConsIntro,     // #(...)
     ByteVecConsIntro, // #u8(...)
-    Quote, // '
-    Quasiquote, // BackQuote
-    Unquote, // ,
-    UnquoteSplicing, // ,@
+    Quote,            // '
+    Quasiquote,       // BackQuote
+    Unquote,          // ,
+    UnquoteSplicing,  // ,@
     Period,
 }
 
@@ -50,11 +50,10 @@ impl Lexer {
         }
     }
 
-    pub fn tokenize(&mut self, input: &str) -> Result<(), InvalidToken> {
-        let mut chars = input.chars();
-        self.current = chars.next();
+    pub fn tokenize(&mut self, mut str_stream: std::str::Chars) -> Result<(), InvalidToken> {
+        self.current = str_stream.next();
         while let Some(_) = self.current {
-            self.token(&mut chars)?;
+            self.token(&mut str_stream)?;
         }
         Ok(())
     }
@@ -370,7 +369,7 @@ fn empty_text() {
 #[test]
 fn simple_tokens() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("#t#f()#()#u8()'`,,@.")?;
+    l.tokenize("#t#f()#()#u8()'`,,@.".chars())?;
     assert_eq!(
         l.tokens,
         vec![
@@ -402,7 +401,7 @@ fn identifier() -> Result<(), InvalidToken> {
     ->string a34kTMNs
     lambda list->vector
     q V17a
-    |two words| |two; words|",
+    |two words| |two; words|".chars(),
     )?;
     assert_eq!(
         l.tokens,
@@ -428,7 +427,7 @@ fn identifier() -> Result<(), InvalidToken> {
 #[test]
 fn character() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("#\\a#\\ #\\\t")?;
+    l.tokenize("#\\a#\\ #\\\t".chars())?;
     assert_eq!(
         l.tokens,
         vec![
@@ -443,7 +442,7 @@ fn character() -> Result<(), InvalidToken> {
 #[test]
 fn string() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("\"()+-123\"\"\\\"\"\"\\a\\b\\t\\r\\n\\\\\\|\"")?;
+    l.tokenize("\"()+-123\"\"\\\"\"\"\\a\\b\\t\\r\\n\\\\\\|\"".chars())?;
     assert_eq!(
         l.tokens,
         vec![
@@ -458,7 +457,7 @@ fn string() -> Result<(), InvalidToken> {
 #[test]
 fn number() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("+123 -123 + -123")?;
+    l.tokenize("+123 -123 + -123".chars())?;
     assert_eq!(
         l.tokens,
         vec![
@@ -475,7 +474,7 @@ fn number() -> Result<(), InvalidToken> {
 
 fn atmosphere() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("\t(- \n4\r(+ 1 2))")?;
+    l.tokenize("\t(- \n4\r(+ 1 2))".chars())?;
     assert_eq!(
         l.tokens,
         vec![
@@ -496,7 +495,7 @@ fn atmosphere() -> Result<(), InvalidToken> {
 #[test]
 fn comment() -> Result<(), InvalidToken> {
     let mut l = Lexer::new();
-    l.tokenize("abcd;+-12\t 12")?;
+    l.tokenize("abcd;+-12\t 12".chars())?;
     assert_eq!(l.tokens, vec![Token::Identifier(String::from("abcd"))]);
     Ok(())
 }
