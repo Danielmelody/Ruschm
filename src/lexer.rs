@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use std::fmt;
-use std::str;
+use std::iter::Iterator;
 
 #[derive(PartialEq, Debug)]
 enum Token {
@@ -21,201 +21,196 @@ enum Token {
 }
 
 #[derive(Debug)]
-struct InvalidToken {
+struct TokenError {
     error: String,
 }
 
-impl fmt::Display for InvalidToken {
+impl fmt::Display for TokenError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Invalid token: {}", self.error)
     }
 }
 
-struct Lexer {
+struct TokenGenerator<CharIter: Iterator<Item = char> + Clone> {
     current: Option<char>,
-    tokens: Vec<Token>,
+    text_iterator: CharIter,
 }
 
 macro_rules! invalid_token {
     ($($arg:tt)*) => (
-        return Err(InvalidToken { error: format!($($arg)*) })
+        return Err(TokenError { error: format!($($arg)*) });
     )
 }
 
-impl Lexer {
-    pub fn new() -> Lexer {
+impl<CharIter: Iterator<Item = char> + Clone> Iterator for TokenGenerator<CharIter> {
+    type Item = Token;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.try_next() {
+            Ok(ret) => ret,
+            Err(_e) => None,
+        }
+    }
+}
+
+fn test_delimiter(c: char) -> Result<(), TokenError> {
+    match c {
+        ' ' | '\t' | '\n' | '\r' | '(' | ')' | '"' | ';' | '|' => Ok(()),
+        _ => invalid_token!("Expect delimiter here instead of {}", c),
+    }
+}
+
+fn is_identifier_initial(c: char) -> bool {
+    match c {
+        'a'...'z'
+        | 'A'...'Z'
+        | '!'
+        | '$'
+        | '%'
+        | '&'
+        | '*'
+        | '/'
+        | ':'
+        | '<'
+        | '='
+        | '>'
+        | '?'
+        | '@'
+        | '^'
+        | '_'
+        | '~' => true,
+        _ => false,
+    }
+}
+
+impl<CharIter: Iterator<Item = char> + Clone> TokenGenerator<CharIter> {
+    pub fn new(mut text_iterator: CharIter) -> TokenGenerator<CharIter> {
         Self {
-            current: None,
-            tokens: Vec::new(),
+            current: text_iterator.next(),
+            text_iterator: text_iterator,
         }
     }
 
-    pub fn tokenize(&mut self, mut str_stream: std::str::Chars) -> Result<(), InvalidToken> {
-        self.current = str_stream.next();
-        while let Some(_) = self.current {
-            self.token(&mut str_stream)?;
-        }
-        Ok(())
-    }
-
-    fn token(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+    fn try_next(&mut self) -> Result<Option<Token>, TokenError> {
         match self.current {
             Some(c) => match c {
-                ' ' | '\t' | '\n' | '\r' => self.atmosphere(current_iter)?,
-                ';' => self.comment(current_iter)?,
-                '(' => self.push_advance(current_iter, Token::LeftParen),
-                ')' => self.push_advance(current_iter, Token::RightParen),
-                '#' => {
-                    self.current = current_iter.next();
-                    match self.current {
-                        Some(cn) => match cn {
-                            '(' => self.push_advance(current_iter, Token::VecConsIntro),
-                            't' => self.push_advance(current_iter, Token::Boolean(true)),
-                            'f' => self.push_advance(current_iter, Token::Boolean(false)),
-                            '\\' => {
-                                self.current = current_iter.next();
-                                match self.current {
-                                    Some(cnn) => {
-                                        self.push_advance(current_iter, Token::Character(cnn))
-                                    }
-                                    None => invalid_token!("expect character after #\\"),
-                                }
-                            }
-                            'u' => {
-                                if Some('8') == current_iter.next()
-                                    && Some('(') == current_iter.next()
-                                {
-                                    self.push_advance(current_iter, Token::ByteVecConsIntro);
-                                } else {
-                                    invalid_token!("Imcomplete bytevector constant introducer");
-                                }
-                            }
-                            _ => invalid_token!("expect '(' 't' or 'f' after #"),
+                ' ' | '\t' | '\n' | '\r' => self.atmosphere(),
+                ';' => self.comment(),
+                '(' => self.generate(Token::LeftParen),
+                ')' => self.generate(Token::RightParen),
+                '#' => match self.nextchar() {
+                    Some(cn) => match cn {
+                        '(' => self.generate(Token::VecConsIntro),
+                        't' => self.generate(Token::Boolean(true)),
+                        'f' => self.generate(Token::Boolean(false)),
+                        '\\' => match self.nextchar() {
+                            Some(cnn) => self.generate(Token::Character(cnn)),
+                            None => invalid_token!("expect character after #\\"),
                         },
-                        None => (),
-                    }
-                }
-                '\'' => self.push_advance(current_iter, Token::Quote),
-                '`' => self.push_advance(current_iter, Token::Quasiquote),
-                ',' => match current_iter.clone().next() {
+                        'u' => {
+                            if Some('8') == self.nextchar() && Some('(') == self.nextchar() {
+                                return self.generate(Token::ByteVecConsIntro);
+                            } else {
+                                invalid_token!("Imcomplete bytevector constant introducer");
+                            }
+                        }
+                        _ => invalid_token!("expect '(' 't' or 'f' after #"),
+                    },
+                    None => invalid_token!("expect '(' 't' or 'f' after #"),
+                },
+                '\'' => self.generate(Token::Quote),
+                '`' => self.generate(Token::Quasiquote),
+                ',' => match self.text_iterator.clone().next() {
                     Some(nc) => match nc {
                         '@' => {
-                            self.current = current_iter.next();
-                            self.push_advance(current_iter, Token::UnquoteSplicing);
+                            self.nextchar();
+                            self.generate(Token::UnquoteSplicing)
                         }
-                        _ => self.push_advance(current_iter, Token::Unquote),
+                        _ => self.generate(Token::Unquote),
                     },
-                    None => (),
+                    None => Ok(None),
                 },
-                '.' => self.percular_identifier(current_iter)?,
-                '+' | '-' => match current_iter.clone().next() {
-                    Some('0'...'9') => self.number(current_iter)?,
-                    _ => self.percular_identifier(current_iter)?,
+                '.' => self.percular_identifier(),
+                '+' | '-' => match self.text_iterator.clone().next() {
+                    Some('0'...'9') => self.number(),
+                    _ => self.percular_identifier(),
                 },
-                '"' => self.string(current_iter)?,
-                '0'...'9' => self.number(current_iter)?,
-                '|' => self.quote_identifier(current_iter)?,
-                _ => self.normal_identifier(current_iter)?,
+                '"' => self.string(),
+                '0'...'9' => self.number(),
+                '|' => self.quote_identifier(),
+                _ => self.normal_identifier(),
             },
-            None => (),
+            None => Ok(None),
         }
-        Ok(())
     }
 
-    fn atmosphere(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+    fn nextchar(&mut self) -> Option<char> {
+        self.current = self.text_iterator.next();
+        self.current
+    }
+
+    fn atmosphere(&mut self) -> Result<Option<Token>, TokenError> {
         while let Some(c) = self.current {
             match c {
                 ' ' | '\t' | '\n' | '\r' => (),
                 _ => break,
             }
-            self.current = current_iter.next();
+            self.nextchar();
         }
-        Ok(())
+        self.try_next()
     }
 
-    fn comment(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+    fn comment(&mut self) -> Result<Option<Token>, TokenError> {
         while let Some(c) = self.current {
             match c {
                 '\n' | '\r' => break,
                 _ => (),
             }
-            self.current = current_iter.next();
+            self.nextchar();
         }
-        Ok(())
+        Ok(None)
     }
 
-    fn is_identifier_initial(c: char) -> bool {
-        match c {
-            'a'...'z'
-            | 'A'...'Z'
-            | '!'
-            | '$'
-            | '%'
-            | '&'
-            | '*'
-            | '/'
-            | ':'
-            | '<'
-            | '='
-            | '>'
-            | '?'
-            | '@'
-            | '^'
-            | '_'
-            | '~' => true,
-            _ => false,
-        }
-    }
-
-    fn normal_identifier(
-        &mut self,
-        current_iter: &mut std::str::Chars,
-    ) -> Result<(), InvalidToken> {
-        if let Some(c) = self.current {
-            let mut identifier_str = String::new();
-            identifier_str.push(c);
-            loop {
-                self.current = current_iter.next();
-                if let Some(nc) = self.current {
-                    match nc {
-                        _ if Self::is_identifier_initial(nc) => identifier_str.push(nc),
-                        '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
-                        _ => {
-                            Lexer::test_delimiter(nc)?;
-                            break;
+    fn normal_identifier(&mut self) -> Result<Option<Token>, TokenError> {
+        match self.current {
+            Some(c) => {
+                let mut identifier_str = String::new();
+                identifier_str.push(c);
+                loop {
+                    if let Some(nc) = self.nextchar() {
+                        match nc {
+                            _ if is_identifier_initial(nc) => identifier_str.push(nc),
+                            '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
+                            _ => {
+                                test_delimiter(nc)?;
+                                break;
+                            }
                         }
+                    } else {
+                        break;
                     }
-                } else {
-                    break;
                 }
+                Ok(Some(Token::Identifier(identifier_str)))
             }
-            self.tokens.push(Token::Identifier(identifier_str));
+            None => Ok(None),
         }
-        Ok(())
     }
 
-    fn dot_subsequent(
-        &mut self,
-        identifier_str: &mut String,
-        current_iter: &mut std::str::Chars,
-    ) -> Result<(), InvalidToken> {
-        self.current = current_iter.next();
-        if let Some(c) = self.current {
+    fn dot_subsequent(&mut self, identifier_str: &mut String) -> Result<(), TokenError> {
+        if let Some(c) = self.nextchar() {
             let valid = match c {
                 '+' | '-' | '.' | '@' => true,
-                _ => Lexer::is_identifier_initial(c),
+                _ => is_identifier_initial(c),
             };
             match valid {
                 true => {
                     identifier_str.push(c);
                     loop {
-                        self.current = current_iter.next();
-                        match self.current {
+                        match self.nextchar() {
                             Some(nc) => match nc {
-                                _ if Lexer::is_identifier_initial(nc) => identifier_str.push(nc),
+                                _ if is_identifier_initial(nc) => identifier_str.push(nc),
                                 '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
                                 _ => {
-                                    Lexer::test_delimiter(nc)?;
+                                    test_delimiter(nc)?;
                                     break;
                                 }
                             },
@@ -223,155 +218,143 @@ impl Lexer {
                         }
                     }
                 }
-                false => Lexer::test_delimiter(c)?,
-            }
-        }
-        Ok(())
-    }
-
-    fn percular_identifier(
-        &mut self,
-        current_iter: &mut std::str::Chars,
-    ) -> Result<(), InvalidToken> {
-        if let Some(c) = self.current {
-            let mut identifier_str = String::new();
-            identifier_str.push(c);
-            match c {
-                '+' | '-' => {
-                    let nc = current_iter.clone().next();
-                    match nc {
-                        Some('.') => {
-                            self.current = current_iter.next();
-                            identifier_str.push('.');
-                            self.dot_subsequent(&mut identifier_str, current_iter)?;
-                        }
-                        // a dot subsequent without a dot is a sign subsequent
-                        Some(_) => self.dot_subsequent(&mut identifier_str, current_iter)?,
-                        None => self.current = current_iter.next(),
-                    }
+                false => {
+                    test_delimiter(c)?;
                 }
-                '.' => self.dot_subsequent(&mut identifier_str, current_iter)?,
-                _ => (),
-            }
-            match identifier_str.as_str() {
-                "." => self.tokens.push(Token::Period),
-                _ => self.tokens.push(Token::Identifier(identifier_str)),
             }
         }
         Ok(())
     }
 
-    fn quote_identifier(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
+    fn percular_identifier(&mut self) -> Result<Option<Token>, TokenError> {
+        match self.current {
+            Some(c) => {
+                let mut identifier_str = String::new();
+                identifier_str.push(c);
+                match c {
+                    '+' | '-' => {
+                        let nc = self.text_iterator.clone().next();
+                        match nc {
+                            Some('.') => {
+                                self.nextchar();
+                                identifier_str.push('.');
+                                self.dot_subsequent(&mut identifier_str)?;
+                            }
+                            // a dot subsequent without a dot is a sign subsequent
+                            Some(_) => self.dot_subsequent(&mut identifier_str)?,
+                            None => {
+                                self.nextchar();
+                            }
+                        }
+                    }
+                    '.' => self.dot_subsequent(&mut identifier_str)?,
+                    _ => (),
+                }
+                match identifier_str.as_str() {
+                    "." => Ok(Some(Token::Period)),
+                    _ => Ok(Some(Token::Identifier(identifier_str))),
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn quote_identifier(&mut self) -> Result<Option<Token>, TokenError> {
         let mut identifier_str = String::new();
         loop {
-            self.current = current_iter.next();
+            self.current = self.text_iterator.next();
             match self.current {
                 None => invalid_token!("Incomplete identifier {}", identifier_str),
-                Some('|') => {
-                    self.push_advance(current_iter, Token::Identifier(identifier_str));
-                    break;
-                }
+                Some('|') => break self.generate(Token::Identifier(identifier_str)),
                 Some(nc) => identifier_str.push(nc),
             }
         }
-        Ok(())
     }
 
-    fn string(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
-        if let Some('"') = self.current {
-            let mut string_literal = String::new();
-            loop {
-                self.current = current_iter.next();
-                if let Some(c) = self.current {
-                    match c {
-                        '"' => {
-                            self.tokens.push(Token::String(string_literal));
-                            break;
-                        }
-                        '\\' => {
-                            self.current = current_iter.next();
-                            match self.current {
-                                Some(ec) => {
-                                    match ec {
-                                        'a' => string_literal.push('\u{007}'),
-                                        'b' => string_literal.push('\u{008}'),
-                                        't' => string_literal.push('\u{009}'),
-                                        'n' => string_literal.push('\n'),
-                                        'r' => string_literal.push('\r'),
-                                        '"' => string_literal.push('"'),
-                                        '\\' => string_literal.push('\\'),
-                                        '|' => string_literal.push('|'),
-                                        'x' => (), // TODO: 'x' for hex value
-                                        ' ' => (), // TODO: space for nothing
-                                        _ => invalid_token!("Unknown escape character"),
+    fn string(&mut self) -> Result<Option<Token>, TokenError> {
+        match self.current {
+            Some(_c) => {
+                let mut string_literal = String::new();
+                loop {
+                    if let Some(c) = self.nextchar() {
+                        match c {
+                            '"' => break self.generate(Token::String(string_literal)),
+                            '\\' => {
+                                match self.nextchar() {
+                                    Some(ec) => {
+                                        match ec {
+                                            'a' => string_literal.push('\u{007}'),
+                                            'b' => string_literal.push('\u{008}'),
+                                            't' => string_literal.push('\u{009}'),
+                                            'n' => string_literal.push('\n'),
+                                            'r' => string_literal.push('\r'),
+                                            '"' => string_literal.push('"'),
+                                            '\\' => string_literal.push('\\'),
+                                            '|' => string_literal.push('|'),
+                                            'x' => (), // TODO: 'x' for hex value
+                                            ' ' => (), // TODO: space for nothing
+                                            _ => invalid_token!("Unknown escape character"),
+                                        }
                                     }
+                                    None => invalid_token!("Incomplete escape character"),
                                 }
-                                None => invalid_token!("Incomplete escape character"),
                             }
+                            _ => string_literal.push(c),
                         }
-                        _ => string_literal.push(c),
+                    } else {
+                        invalid_token!("Unclosed string literal")
                     }
-                } else {
-                    invalid_token!("Unclosed string literal")
                 }
             }
+            None => Ok(None),
         }
-        self.current = current_iter.next();
-        Ok(())
     }
 
-    fn number(&mut self, current_iter: &mut std::str::Chars) -> Result<(), InvalidToken> {
-        if let Some(c) = self.current {
-            let mut number_str = String::new();
-            number_str.push(c);
-            loop {
-                self.current = current_iter.next();
-                match self.current {
-                    Some(nc) => match nc {
-                        '0'...'9' => {
-                            number_str.push(nc);
-                        }
-                        _ => {
-                            Lexer::test_delimiter(nc)?;
-                            break;
-                        }
-                    },
-                    None => break,
+    fn number(&mut self) -> Result<Option<Token>, TokenError> {
+        match self.current {
+            Some(c) => {
+                let mut number_str = String::new();
+                number_str.push(c);
+                loop {
+                    match self.nextchar() {
+                        Some(nc) => match nc {
+                            '0'...'9' => {
+                                number_str.push(nc);
+                            }
+                            _ => {
+                                test_delimiter(nc)?;
+                                break;
+                            }
+                        },
+                        None => break,
+                    }
+                }
+                match number_str.parse() {
+                    Ok(number) => Ok(Some(Token::Number(number))),
+                    Err(_) => invalid_token!("Unrecognized number: {}", number_str),
                 }
             }
-            match number_str.parse() {
-                Ok(number) => self.tokens.push(Token::Number(number)),
-                Err(_) => invalid_token!("Unrecognized number: {}", number_str),
-            }
+            None => Ok(None),
         }
-        Ok(())
     }
 
-    fn push_advance(&mut self, current_iter: &mut std::str::Chars, token: Token) {
-        self.tokens.push(token);
-        self.current = current_iter.next();
-    }
-
-    fn test_delimiter(c: char) -> Result<(), InvalidToken> {
-        match c {
-            ' ' | '\t' | '\n' | '\r' | '(' | ')' | '"' | ';' | '|' => Ok(()),
-            _ => invalid_token!("Expect delimiter here instead of {}", c),
-        }
+    fn generate(&mut self, token: Token) -> Result<Option<Token>, TokenError> {
+        self.nextchar();
+        Ok(Some(token))
     }
 }
 
 #[test]
 fn empty_text() {
-    let c = Lexer::new();
+    let c = TokenGenerator::new("".chars());
     assert_eq!(c.current, None);
 }
 
 #[test]
-fn simple_tokens() -> Result<(), InvalidToken> {
-    let mut l = Lexer::new();
-    l.tokenize("#t#f()#()#u8()'`,,@.".chars())?;
+fn simple_tokens() -> Result<(), TokenError> {
+    let l = TokenGenerator::new("#t#f()#()#u8()'`,,@.".chars());
     assert_eq!(
-        l.tokens,
+        l.collect::<Vec<Token>>(),
         vec![
             Token::Boolean(true),
             Token::Boolean(false),
@@ -392,19 +375,19 @@ fn simple_tokens() -> Result<(), InvalidToken> {
 }
 
 #[test]
-fn identifier() -> Result<(), InvalidToken> {
-    let mut l = Lexer::new();
-    l.tokenize(
+fn identifier() -> Result<(), TokenError> {
+    let l = TokenGenerator::new(
         "
     ... +
     +soup+ <=?
     ->string a34kTMNs
     lambda list->vector
     q V17a
-    |two words| |two; words|".chars(),
-    )?;
+    |two words| |two; words|"
+            .chars(),
+    );
     assert_eq!(
-        l.tokens,
+        l.collect::<Vec<_>>(),
         vec![
             Token::Identifier(String::from("...")),
             Token::Identifier(String::from("+")),
@@ -425,11 +408,10 @@ fn identifier() -> Result<(), InvalidToken> {
 }
 
 #[test]
-fn character() -> Result<(), InvalidToken> {
-    let mut l = Lexer::new();
-    l.tokenize("#\\a#\\ #\\\t".chars())?;
+fn character() -> Result<(), TokenError> {
+    let l = TokenGenerator::new("#\\a#\\ #\\\t".chars());
     assert_eq!(
-        l.tokens,
+        l.collect::<Vec<_>>(),
         vec![
             Token::Character('a'),
             Token::Character(' '),
@@ -440,11 +422,10 @@ fn character() -> Result<(), InvalidToken> {
 }
 
 #[test]
-fn string() -> Result<(), InvalidToken> {
-    let mut l = Lexer::new();
-    l.tokenize("\"()+-123\"\"\\\"\"\"\\a\\b\\t\\r\\n\\\\\\|\"".chars())?;
+fn string() -> Result<(), TokenError> {
+    let l = TokenGenerator::new("\"()+-123\"\"\\\"\"\"\\a\\b\\t\\r\\n\\\\\\|\"".chars());
     assert_eq!(
-        l.tokens,
+        l.collect::<Vec<_>>(),
         vec![
             Token::String(String::from("()+-123")),
             Token::String(String::from("\"")),
@@ -455,11 +436,10 @@ fn string() -> Result<(), InvalidToken> {
 }
 
 #[test]
-fn number() -> Result<(), InvalidToken> {
-    let mut l = Lexer::new();
-    l.tokenize("+123 -123 + -123".chars())?;
+fn number() -> Result<(), TokenError> {
+    let l = TokenGenerator::new("+123 -123 + -123".chars());
     assert_eq!(
-        l.tokens,
+        l.collect::<Vec<_>>(),
         vec![
             Token::Number(123),
             Token::Number(-123),
@@ -472,11 +452,10 @@ fn number() -> Result<(), InvalidToken> {
 
 #[test]
 
-fn atmosphere() -> Result<(), InvalidToken> {
-    let mut l = Lexer::new();
-    l.tokenize("\t(- \n4\r(+ 1 2))".chars())?;
+fn atmosphere() -> Result<(), TokenError> {
+    let l = TokenGenerator::new("\t(- \n4\r(+ 1 2))".chars());
     assert_eq!(
-        l.tokens,
+        l.collect::<Vec<_>>(),
         vec![
             Token::LeftParen,
             Token::Identifier(String::from("-")),
@@ -493,9 +472,11 @@ fn atmosphere() -> Result<(), InvalidToken> {
 }
 
 #[test]
-fn comment() -> Result<(), InvalidToken> {
-    let mut l = Lexer::new();
-    l.tokenize("abcd;+-12\t 12".chars())?;
-    assert_eq!(l.tokens, vec![Token::Identifier(String::from("abcd"))]);
+fn comment() -> Result<(), TokenError> {
+    let l = TokenGenerator::new("abcd;+-12\t 12".chars());
+    assert_eq!(
+        l.collect::<Vec<_>>(),
+        vec![Token::Identifier(String::from("abcd"))]
+    );
     Ok(())
 }
