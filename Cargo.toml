@@ -1,7 +1,19 @@
 [package]
 name = "rust-scheme"
 version = "0.0.1"
-authors = ["Danielhu <yimingdz@gmail.com>"]
+authors = ["Danielhu <yimingdz@gmail.com>", "hrl <cxghrl@gmail.com>"]
 edition = "2018"
+repository = "https://github.com/Danielhu229/RustScheme"
+description = "A scheme interpreter written in Rust"
+license = "MIT"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+exclude = [
+    ".github/",
+    ".vscode/",
+    ".editorconfig",
+    ".gitignore",
+    ".cargo_vcs_info.json"
+]
