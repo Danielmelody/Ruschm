@@ -1,10 +1,10 @@
 [package]
 name = "rust-scheme"
-version = "0.0.1"
+version = "0.1.0-alpha.0"
 authors = ["Danielhu <yimingdz@gmail.com>", "hrl <cxghrl@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/Danielhu229/RustScheme"
-description = "A scheme interpreter written in Rust"
+description = "Scheme(R7RS) interpretor/compiler rust implementation"
 license = "MIT"
 readme = "README.md"
 
