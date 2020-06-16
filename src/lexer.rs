@@ -2,8 +2,8 @@
 use std::fmt;
 use std::iter::Iterator;
 
-#[derive(PartialEq, Debug)]
-enum Token {
+#[derive(PartialEq, Debug, Clone)]
+pub enum Token {
     Identifier(String),
     Boolean(bool),
     Number(i64), // exact integers only
@@ -61,8 +61,8 @@ fn test_delimiter(c: char) -> Result<(), TokenError> {
 
 fn is_identifier_initial(c: char) -> bool {
     match c {
-        'a'...'z'
-        | 'A'...'Z'
+        'a'..='z'
+        | 'A'..='Z'
         | '!'
         | '$'
         | '%'
@@ -131,11 +131,11 @@ impl<CharIter: Iterator<Item = char> + Clone> TokenGenerator<CharIter> {
                 },
                 '.' => self.percular_identifier(),
                 '+' | '-' => match self.text_iterator.clone().next() {
-                    Some('0'...'9') => self.number(),
+                    Some('0'..='9') => self.number(),
                     _ => self.percular_identifier(),
                 },
                 '"' => self.string(),
-                '0'...'9' => self.number(),
+                '0'..='9' => self.number(),
                 '|' => self.quote_identifier(),
                 _ => self.normal_identifier(),
             },
@@ -179,7 +179,7 @@ impl<CharIter: Iterator<Item = char> + Clone> TokenGenerator<CharIter> {
                     if let Some(nc) = self.nextchar() {
                         match nc {
                             _ if is_identifier_initial(nc) => identifier_str.push(nc),
-                            '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
+                            '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
                             _ => {
                                 test_delimiter(nc)?;
                                 break;
@@ -208,7 +208,7 @@ impl<CharIter: Iterator<Item = char> + Clone> TokenGenerator<CharIter> {
                         match self.nextchar() {
                             Some(nc) => match nc {
                                 _ if is_identifier_initial(nc) => identifier_str.push(nc),
-                                '0'...'9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
+                                '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
                                 _ => {
                                     test_delimiter(nc)?;
                                     break;
@@ -318,7 +318,7 @@ impl<CharIter: Iterator<Item = char> + Clone> TokenGenerator<CharIter> {
                 loop {
                     match self.nextchar() {
                         Some(nc) => match nc {
-                            '0'...'9' => {
+                            '0'..='9' => {
                                 number_str.push(nc);
                             }
                             _ => {
@@ -378,7 +378,7 @@ fn simple_tokens() -> Result<(), TokenError> {
 fn identifier() -> Result<(), TokenError> {
     let l = TokenGenerator::new(
         "
-    ... +
+    ..= +
     +soup+ <=?
     ->string a34kTMNs
     lambda list->vector
@@ -389,7 +389,7 @@ fn identifier() -> Result<(), TokenError> {
     assert_eq!(
         l.collect::<Vec<_>>(),
         vec![
-            Token::Identifier(String::from("...")),
+            Token::Identifier(String::from("..=")),
             Token::Identifier(String::from("+")),
             Token::Identifier(String::from("+soup+")),
             Token::Identifier(String::from("<=?")),
