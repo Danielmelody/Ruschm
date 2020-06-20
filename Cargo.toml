@@ -17,3 +17,6 @@ exclude = [
     ".gitignore",
     ".cargo_vcs_info.json"
 ]
+
+[lib]
+crate-type = ["cdylib"]
