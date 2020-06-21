@@ -6,7 +6,7 @@ use std::iter::Iterator;
 #[derive(PartialEq, Debug)]
 enum Expression {
     Identifier(String),
-    Number(i64),
+    Number(String),
     ProcudureCall(Box<Expression>, Vec<Box<Expression>>),
 }
 
@@ -87,10 +87,10 @@ fn empty() {
 
 #[test]
 fn number() {
-    let tokens = vec![Token::Number(1)];
+    let tokens = vec![Token::Number("1".to_string())];
     let mut parser = Parser::new(tokens.into_iter());
     let ast = parser.parse().unwrap().unwrap();
-    assert_eq!(*ast, Expression::Number(1));
+    assert_eq!(*ast, Expression::Number("1".to_string()));
 }
 
 #[test]
@@ -106,9 +106,9 @@ fn procedure_call() {
     let tokens = vec![
         Token::LeftParen,
         Token::Identifier("+".to_string()),
-        Token::Number(1),
-        Token::Number(2),
-        Token::Number(3),
+        Token::Number("1".to_string()),
+        Token::Number("2".to_string()),
+        Token::Number("3".to_string()),
         Token::RightParen,
     ];
     let mut parser = Parser::new(tokens.into_iter());
@@ -118,9 +118,9 @@ fn procedure_call() {
         Expression::ProcudureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
-                Box::new(Expression::Number(1)),
-                Box::new(Expression::Number(2)),
-                Box::new(Expression::Number(3)),
+                Box::new(Expression::Number("1".to_string())),
+                Box::new(Expression::Number("2".to_string())),
+                Box::new(Expression::Number("3".to_string())),
             ]
         )
     );
@@ -131,9 +131,9 @@ fn unmatched_parantheses() {
     let tokens = vec![
         Token::LeftParen,
         Token::Identifier("+".to_string()),
-        Token::Number(1),
-        Token::Number(2),
-        Token::Number(3),
+        Token::Number("1".to_string()),
+        Token::Number("2".to_string()),
+        Token::Number("3".to_string()),
     ];
     let mut parser = Parser::new(tokens.into_iter());
     assert_eq!(
@@ -149,11 +149,11 @@ fn nested_procedure_call() {
     let tokens = vec![
         Token::LeftParen,
         Token::Identifier("+".to_string()),
-        Token::Number(1),
+        Token::Number("1".to_string()),
         Token::LeftParen,
         Token::Identifier("-".to_string()),
-        Token::Number(2),
-        Token::Number(3),
+        Token::Number("2".to_string()),
+        Token::Number("3".to_string()),
         Token::RightParen,
         Token::RightParen,
     ];
@@ -164,12 +164,12 @@ fn nested_procedure_call() {
         Expression::ProcudureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
-                Box::new(Expression::Number(1)),
+                Box::new(Expression::Number("1".to_string())),
                 Box::new(Expression::ProcudureCall(
                     Box::new(Expression::Identifier("-".to_string())),
                     vec![
-                        Box::new(Expression::Number(2)),
-                        Box::new(Expression::Number(3))
+                        Box::new(Expression::Number("2".to_string())),
+                        Box::new(Expression::Number("3".to_string()))
                     ]
                 )),
             ]
