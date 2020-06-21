@@ -6,7 +6,7 @@ use std::iter::Iterator;
 pub enum Token {
     Identifier(String),
     Boolean(bool),
-    Number(i64), // exact integers only
+    Number(String), // delay the conversion of number literal to internal represent for different virtual machines.
     Character(char),
     String(String),
     LeftParen,
@@ -132,6 +132,7 @@ impl<CharIter: Iterator<Item = char> + Clone> TokenGenerator<CharIter> {
                 '.' => self.percular_identifier(),
                 '+' | '-' => match self.text_iterator.clone().next() {
                     Some('0'..='9') => self.number(),
+                    Some('.') => self.number(),
                     _ => self.percular_identifier(),
                 },
                 '"' => self.string(),
@@ -310,28 +311,105 @@ impl<CharIter: Iterator<Item = char> + Clone> TokenGenerator<CharIter> {
         }
     }
 
+    fn digital10(&mut self, number_literal: &mut String) -> Result<(), TokenError> {
+        match self.nextchar() {
+            Some(nc) => match nc {
+                '0'..='9' => {
+                    number_literal.push(nc);
+                    loop {
+                        match self.nextchar() {
+                            Some(nc) => match nc {
+                                '0'..='9' => number_literal.push(nc),
+                                _ => {
+                                    test_delimiter(nc)?;
+                                    break Ok(());
+                                }
+                            },
+                            None => break Ok(()),
+                        }
+                    }
+                }
+                _ => {
+                    test_delimiter(nc)?;
+                    Ok(())
+                }
+            },
+            None => Ok(()),
+        }
+    }
+
+    fn number_suffix(&mut self, number_literal: &mut String) -> Result<(), TokenError> {
+        number_literal.push('e');
+        if let Some(sign) = self.text_iterator.clone().next() {
+            if (sign == '+') || (sign == '-') {
+                number_literal.push(sign);
+                self.nextchar();
+            }
+        }
+        self.digital10(number_literal)
+    }
+
+    fn demical(&mut self, number_literal: &mut String) -> Result<(), TokenError> {
+        number_literal.push('.');
+        match self.nextchar() {
+            Some(nc) => match nc {
+                'e' => self.number_suffix(number_literal),
+                '0'..='9' => {
+                    number_literal.push(nc);
+                    loop {
+                        match self.nextchar() {
+                            Some(nc) => match nc {
+                                '0'..='9' => number_literal.push(nc),
+                                'e' => break self.number_suffix(number_literal),
+                                _ => {
+                                    test_delimiter(nc)?;
+                                    break Ok(());
+                                }
+                            },
+                            None => break Ok(()),
+                        }
+                    }
+                }
+                _ => {
+                    test_delimiter(nc)?;
+                    Ok(())
+                }
+            },
+            None => Ok(()),
+        }
+    }
+
     fn number(&mut self) -> Result<Option<Token>, TokenError> {
         match self.current {
             Some(c) => {
-                let mut number_str = String::new();
-                number_str.push(c);
+                let mut number_literal = String::new();
+                number_literal.push(c);
                 loop {
                     match self.nextchar() {
                         Some(nc) => match nc {
                             '0'..='9' => {
-                                number_str.push(nc);
+                                number_literal.push(nc);
+                            }
+                            'e' => {
+                                self.number_suffix(&mut number_literal)?;
+                                break Ok(Some(Token::Number(number_literal)));
+                            }
+                            '.' => {
+                                self.demical(&mut number_literal)?;
+                                break Ok(Some(Token::Number(number_literal)));
+                            }
+                            '/' => {
+                                number_literal.push('/');
+                                self.digital10(&mut number_literal)?;
+                                break Ok(Some(Token::Number(number_literal)));
                             }
                             _ => {
                                 test_delimiter(nc)?;
-                                break;
+                                break Ok(Some(Token::Number(number_literal)));
                             }
                         },
-                        None => break,
+                        None => break Ok(Some(Token::Number(number_literal))),
                     }
-                }
-                match number_str.parse() {
-                    Ok(number) => Ok(Some(Token::Number(number))),
-                    Err(_) => invalid_token!("Unrecognized number: {}", number_str),
                 }
             }
             None => Ok(None),
@@ -378,7 +456,7 @@ fn simple_tokens() -> Result<(), TokenError> {
 fn identifier() -> Result<(), TokenError> {
     let l = TokenGenerator::new(
         "
-    ..= +
+    ... +
     +soup+ <=?
     ->string a34kTMNs
     lambda list->vector
@@ -389,7 +467,7 @@ fn identifier() -> Result<(), TokenError> {
     assert_eq!(
         l.collect::<Vec<_>>(),
         vec![
-            Token::Identifier(String::from("..=")),
+            Token::Identifier(String::from("...")),
             Token::Identifier(String::from("+")),
             Token::Identifier(String::from("+soup+")),
             Token::Identifier(String::from("<=?")),
@@ -437,14 +515,33 @@ fn string() -> Result<(), TokenError> {
 
 #[test]
 fn number() -> Result<(), TokenError> {
-    let l = TokenGenerator::new("+123 -123 + -123".chars());
+    let l = TokenGenerator::new(
+        "+123 123 -123
+                        1.23 -12.34 1. 0. +.0 -.1
+                        1e10 1.3e20 -43.e-12 +.12e+12
+                        1/2 +1/2 -32/3
+        "
+        .chars(),
+    );
     assert_eq!(
         l.collect::<Vec<_>>(),
         vec![
-            Token::Number(123),
-            Token::Number(-123),
-            Token::Identifier(String::from("+")),
-            Token::Number(-123),
+            Token::Number("+123".to_string()),
+            Token::Number("123".to_string()),
+            Token::Number("-123".to_string()),
+            Token::Number("1.23".to_string()),
+            Token::Number("-12.34".to_string()),
+            Token::Number("1.".to_string()),
+            Token::Number("0.".to_string()),
+            Token::Number("+.0".to_string()),
+            Token::Number("-.1".to_string()),
+            Token::Number("1e10".to_string()),
+            Token::Number("1.3e20".to_string()),
+            Token::Number("-43.e-12".to_string()),
+            Token::Number("+.12e+12".to_string()),
+            Token::Number("1/2".to_string()),
+            Token::Number("+1/2".to_string()),
+            Token::Number("-32/3".to_string()),
         ]
     );
     Ok(())
@@ -459,11 +556,11 @@ fn atmosphere() -> Result<(), TokenError> {
         vec![
             Token::LeftParen,
             Token::Identifier(String::from("-")),
-            Token::Number(4),
+            Token::Number("4".to_string()),
             Token::LeftParen,
             Token::Identifier(String::from("+")),
-            Token::Number(1),
-            Token::Number(2),
+            Token::Number("1".to_string()),
+            Token::Number("2".to_string()),
             Token::RightParen,
             Token::RightParen
         ]
