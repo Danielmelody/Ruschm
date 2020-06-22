@@ -21,7 +21,7 @@ pub enum Token {
 }
 
 #[derive(Debug)]
-struct TokenError {
+pub struct TokenError {
     error: String,
 }
 
@@ -31,7 +31,7 @@ impl fmt::Display for TokenError {
     }
 }
 
-struct TokenGenerator<CharIter: Iterator<Item = char> + Clone> {
+pub struct TokenGenerator<CharIter: Iterator<Item = char> + Clone> {
     current: Option<char>,
     text_iterator: CharIter,
 }

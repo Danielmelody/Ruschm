@@ -4,14 +4,14 @@ use std::fmt;
 use std::iter::Iterator;
 
 #[derive(PartialEq, Debug)]
-enum Expression {
+pub enum Expression {
     Identifier(String),
     Number(String),
     ProcudureCall(Box<Expression>, Vec<Box<Expression>>),
 }
 
 #[derive(Debug, PartialEq)]
-struct SyntaxError {
+pub struct SyntaxError {
     error: String,
 }
 
@@ -27,7 +27,7 @@ macro_rules! syntax_error {
     )
 }
 
-struct Parser<TokenIter: Iterator<Item = Token> + Clone> {
+pub struct Parser<TokenIter: Iterator<Item = Token> + Clone> {
     current: Option<Token>,
     lexer: TokenIter,
 }
