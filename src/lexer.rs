@@ -31,6 +31,7 @@ impl fmt::Display for TokenError {
     }
 }
 
+#[derive(Clone)]
 pub struct TokenGenerator<CharIter: Iterator<Item = char> + Clone> {
     current: Option<char>,
     text_iterator: CharIter,

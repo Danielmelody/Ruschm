@@ -2,7 +2,7 @@
 **/*.rs.bk
 .vscode/
 .idea/
-# Cargo.lock
+Cargo.lock
 
 # Ignore tags created by etags, ctags, gtags (GNU global) and cscope
 TAGS
