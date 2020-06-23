@@ -3,6 +3,8 @@ use crate::lexer::Token;
 use std::fmt;
 use std::iter::Iterator;
 
+type Result<T> = std::result::Result<T, SyntaxError>;
+
 #[derive(PartialEq, Debug)]
 pub enum Expression {
     Identifier(String),
@@ -40,7 +42,7 @@ impl<TokenIter: Iterator<Item = Token> + Clone> Parser<TokenIter> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Option<Box<Expression>>, SyntaxError> {
+    pub fn parse(&mut self) -> Result<Option<Box<Expression>>> {
         match self.current.clone() {
             Some(token) => match token {
                 Token::Number(a) => self.generate(Box::new(Expression::Number(a))),
@@ -52,7 +54,7 @@ impl<TokenIter: Iterator<Item = Token> + Clone> Parser<TokenIter> {
         }
     }
 
-    fn procedure_call(&mut self) -> Result<Option<Box<Expression>>, SyntaxError> {
+    fn procedure_call(&mut self) -> Result<Option<Box<Expression>>> {
         self.advance();
         let operator = self.parse()?.unwrap();
         let mut params: Vec<Box<Expression>> = vec![];
@@ -71,7 +73,7 @@ impl<TokenIter: Iterator<Item = Token> + Clone> Parser<TokenIter> {
         self.current = self.lexer.next();
     }
 
-    fn generate(&mut self, ast: Box<Expression>) -> Result<Option<Box<Expression>>, SyntaxError> {
+    fn generate(&mut self, ast: Box<Expression>) -> Result<Option<Box<Expression>>> {
         self.advance();
         Ok(Some(ast))
     }
