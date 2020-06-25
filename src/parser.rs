@@ -48,6 +48,7 @@ impl<TokenIter: Iterator<Item = Token> + Clone> Parser<TokenIter> {
                 Token::Number(a) => self.generate(Box::new(Expression::Number(a))),
                 Token::Identifier(a) => self.generate(Box::new(Expression::Identifier(a))),
                 Token::LeftParen => self.procedure_call(),
+                Token::RightParen => syntax_error!("Unmatched Parentheses!"),
                 _ => Ok(None),
             },
             None => Ok(None),
@@ -56,15 +57,23 @@ impl<TokenIter: Iterator<Item = Token> + Clone> Parser<TokenIter> {
 
     fn procedure_call(&mut self) -> Result<Option<Box<Expression>>> {
         self.advance();
-        let operator = self.parse()?.unwrap();
-        let mut params: Vec<Box<Expression>> = vec![];
-        loop {
-            match &self.current {
-                Some(Token::RightParen) => {
-                    return self.generate(Box::new(Expression::ProcudureCall(operator, params)));
+        match self.parse()? {
+            None => Ok(None),
+            Some(operator) => {
+                let mut params: Vec<Box<Expression>> = vec![];
+                loop {
+                    match &self.current {
+                        Some(Token::RightParen) => {
+                            return self.generate(Box::new(Expression::ProcudureCall(operator, params)));
+                        }
+                        None => syntax_error!("Unmatched Parentheses!"),
+                        _ => params.push(
+                            match self.parse()? {
+                                None => syntax_error!("Unmatched Parentheses!"),
+                                Some(subexpr) => subexpr
+                            }),
+                    }
                 }
-                None => syntax_error!("Unmatched Parentheses!"),
-                _ => params.push(self.parse()?.unwrap()),
             }
         }
     }
@@ -80,31 +89,34 @@ impl<TokenIter: Iterator<Item = Token> + Clone> Parser<TokenIter> {
 }
 
 #[test]
-fn empty() {
+fn empty() -> Result<()> {
     let tokens = Vec::new();
     let mut parser = Parser::new(tokens.into_iter());
-    let ast = parser.parse().unwrap();
+    let ast = parser.parse()?;
     assert_eq!(ast, None);
+    Ok(())
 }
 
 #[test]
-fn number() {
+fn number() -> Result<()>{
     let tokens = vec![Token::Number("1".to_string())];
     let mut parser = Parser::new(tokens.into_iter());
-    let ast = parser.parse().unwrap().unwrap();
-    assert_eq!(*ast, Expression::Number("1".to_string()));
+    let ast = parser.parse()?;
+    assert_eq!(ast, Some(Box::new(Expression::Number("1".to_string()))));
+    Ok(())
 }
 
 #[test]
-fn identifier() {
+fn identifier() -> Result<()>{
     let tokens = vec![Token::Identifier("test".to_string())];
     let mut parser = Parser::new(tokens.into_iter());
-    let ast = parser.parse().unwrap().unwrap();
-    assert_eq!(*ast, Expression::Identifier("test".to_string()));
+    let ast = parser.parse()?;
+    assert_eq!(ast, Some(Box::new(Expression::Identifier("test".to_string()))));
+    Ok(())
 }
 
 #[test]
-fn procedure_call() {
+fn procedure_call() -> Result<()> {
     let tokens = vec![
         Token::LeftParen,
         Token::Identifier("+".to_string()),
@@ -114,18 +126,19 @@ fn procedure_call() {
         Token::RightParen,
     ];
     let mut parser = Parser::new(tokens.into_iter());
-    let ast = parser.parse().unwrap().unwrap();
+    let ast = parser.parse()?;
     assert_eq!(
-        *ast,
-        Expression::ProcudureCall(
+        ast,
+        Some(Box::new( Expression::ProcudureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Number("1".to_string())),
                 Box::new(Expression::Number("2".to_string())),
                 Box::new(Expression::Number("3".to_string())),
             ]
-        )
+        )))
     );
+    Ok(())
 }
 
 #[test]
@@ -147,7 +160,7 @@ fn unmatched_parantheses() {
 }
 
 #[test]
-fn nested_procedure_call() {
+fn nested_procedure_call() -> Result<()>{
     let tokens = vec![
         Token::LeftParen,
         Token::Identifier("+".to_string()),
@@ -160,10 +173,10 @@ fn nested_procedure_call() {
         Token::RightParen,
     ];
     let mut parser = Parser::new(tokens.into_iter());
-    let ast = parser.parse().unwrap().unwrap();
+    let ast = parser.parse()?;
     assert_eq!(
-        *ast,
-        Expression::ProcudureCall(
+        ast,
+        Some(Box::new(Expression::ProcudureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Number("1".to_string())),
@@ -175,6 +188,7 @@ fn nested_procedure_call() {
                     ]
                 )),
             ]
-        )
+        )))
     );
+    Ok(())
 }
