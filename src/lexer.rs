@@ -4,11 +4,14 @@ use std::iter::Iterator;
 
 type Result<T> = std::result::Result<T, TokenError>;
 
+
 #[derive(PartialEq, Debug, Clone)]
 pub enum Token {
     Identifier(String),
     Boolean(bool),
-    Number(String), // delay the conversion of number literal to internal represent for different virtual machines.
+    Demicals(String), // delay the conversion of demical literal to internal represent for different virtual machines (for example, fixed-points).
+    Interger(i64),
+    Rational(i64, u64),
     Character(char),
     String(String),
     LeftParen,
@@ -395,23 +398,26 @@ impl<CharIter: Iterator<Item = char> + Clone> TokenGenerator<CharIter> {
                             }
                             'e' => {
                                 self.number_suffix(&mut number_literal)?;
-                                break Ok(Some(Token::Number(number_literal)));
+                                break Ok(Some(Token::Demicals(number_literal)));
                             }
                             '.' => {
                                 self.demical(&mut number_literal)?;
-                                break Ok(Some(Token::Number(number_literal)));
+                                break Ok(Some(Token::Demicals(number_literal)));
                             }
                             '/' => {
-                                number_literal.push('/');
-                                self.digital10(&mut number_literal)?;
-                                break Ok(Some(Token::Number(number_literal)));
+                                let mut denominator = String::new();
+                                self.digital10(&mut denominator)?;
+                                break Ok(Some(Token::Rational(
+                                    number_literal.parse::<i64>().unwrap(),
+                                    denominator.parse::<u64>().unwrap()
+                                )));
                             }
                             _ => {
                                 test_delimiter(nc)?;
-                                break Ok(Some(Token::Number(number_literal)));
+                                break Ok(Some(Token::Interger(number_literal.parse::<i64>().unwrap())));
                             }
                         },
-                        None => break Ok(Some(Token::Number(number_literal))),
+                        None => break Ok(Some(Token::Interger(number_literal.parse::<i64>().unwrap())))
                     }
                 }
             }
@@ -529,22 +535,22 @@ fn number() -> Result<()> {
     assert_eq!(
         l.collect::<Vec<_>>(),
         vec![
-            Token::Number("+123".to_string()),
-            Token::Number("123".to_string()),
-            Token::Number("-123".to_string()),
-            Token::Number("1.23".to_string()),
-            Token::Number("-12.34".to_string()),
-            Token::Number("1.".to_string()),
-            Token::Number("0.".to_string()),
-            Token::Number("+.0".to_string()),
-            Token::Number("-.1".to_string()),
-            Token::Number("1e10".to_string()),
-            Token::Number("1.3e20".to_string()),
-            Token::Number("-43.e-12".to_string()),
-            Token::Number("+.12e+12".to_string()),
-            Token::Number("1/2".to_string()),
-            Token::Number("+1/2".to_string()),
-            Token::Number("-32/3".to_string()),
+            Token::Interger(123),
+            Token::Interger(123),
+            Token::Interger(-123),
+            Token::Demicals("1.23".to_string()),
+            Token::Demicals("-12.34".to_string()),
+            Token::Demicals("1.".to_string()),
+            Token::Demicals("0.".to_string()),
+            Token::Demicals("+.0".to_string()),
+            Token::Demicals("-.1".to_string()),
+            Token::Demicals("1e10".to_string()),
+            Token::Demicals("1.3e20".to_string()),
+            Token::Demicals("-43.e-12".to_string()),
+            Token::Demicals("+.12e+12".to_string()),
+            Token::Rational(1, 2),
+            Token::Rational(1, 2),
+            Token::Rational(-32, 3),
         ]
     );
     Ok(())
@@ -559,11 +565,11 @@ fn atmosphere() -> Result<()> {
         vec![
             Token::LeftParen,
             Token::Identifier(String::from("-")),
-            Token::Number("4".to_string()),
+            Token::Interger(4),
             Token::LeftParen,
             Token::Identifier(String::from("+")),
-            Token::Number("1".to_string()),
-            Token::Number("2".to_string()),
+            Token::Interger(1),
+            Token::Interger(2),
             Token::RightParen,
             Token::RightParen
         ]
