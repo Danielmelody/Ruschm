@@ -1,9 +1,17 @@
 #![allow(dead_code)]
+use crate::error::*;
 use crate::lexer::Token;
-use std::fmt;
+use std::iter::FromIterator;
 use std::iter::Iterator;
 
-type Result<T> = std::result::Result<T, SyntaxError>;
+type Result<T> = std::result::Result<T, Error>;
+pub type ParseResult = Result<Option<Box<Expression>>>;
+
+macro_rules! syntax_error {
+    ($($arg:tt)*) => (
+        return Err(Error {category: ErrorType::Syntax, message: format!($($arg)*) });
+    )
+}
 
 #[derive(PartialEq, Debug)]
 pub enum Expression {
@@ -14,29 +22,19 @@ pub enum Expression {
     ProcudureCall(Box<Expression>, Vec<Box<Expression>>),
 }
 
-#[derive(Debug, PartialEq)]
-pub struct SyntaxError {
-    error: String,
-}
-
-impl fmt::Display for SyntaxError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Syntax error: {}", self.error)
-    }
-}
-
-macro_rules! syntax_error {
-    ($($arg:tt)*) => (
-        return Err(SyntaxError { error: format!($($arg)*) });
-    )
-}
-
-pub struct Parser<TokenIter: Iterator<Item = Token> + Clone> {
+pub struct Parser<TokenIter: Iterator<Item = Token>> {
     current: Option<Token>,
     lexer: TokenIter,
 }
 
-impl<TokenIter: Iterator<Item = Token> + Clone> Parser<TokenIter> {
+impl FromIterator<Token> for Result<Option<Box<Expression>>> {
+    fn from_iter<I: IntoIterator<Item = Token>>(iter: I) -> Self {
+        let mut p = Parser::new(iter.into_iter());
+        p.parse()
+    }
+}
+
+impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     pub fn new(mut lexer: TokenIter) -> Parser<TokenIter> {
         Self {
             current: lexer.next(),
@@ -178,8 +176,9 @@ fn unmatched_parantheses() {
     let mut parser = Parser::new(tokens.into_iter());
     assert_eq!(
         parser.parse(),
-        Err(SyntaxError {
-            error: "Unmatched Parentheses!".to_string()
+        Err(Error {
+            category: ErrorType::Syntax,
+            message: "Unmatched Parentheses!".to_string()
         })
     );
 }
