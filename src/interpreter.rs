@@ -1,21 +1,12 @@
-use crate::lexer::TokenGenerator;
+use crate::error::*;
 use crate::parser::*;
 use std::fmt;
 
-#[derive(Debug, PartialEq)]
-pub struct LogicError {
-    error: String,
-}
-
-impl fmt::Display for LogicError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "error: {}", self.error)
-    }
-}
+type Result<T> = std::result::Result<T, Error>;
 
 macro_rules! logic_error {
     ($($arg:tt)*) => (
-        return Err(LogicError { error: format!($($arg)*) });
+        return Err(Error {category: ErrorType::Logic , message: format!($($arg)*) });
     )
 }
 
@@ -95,8 +86,8 @@ impl std::ops::Mul<Number> for Number {
 }
 
 impl std::ops::Div<Number> for Number {
-    type Output = Result<Number, LogicError>;
-    fn div(self, rhs: Number) -> Result<Number, LogicError> {
+    type Output = Result<Number>;
+    fn div(self, rhs: Number) -> Result<Number> {
         match upcast_oprands((self, rhs)) {
             NumberBinaryOperand::Interger(a, b) => {
                 check_division_by_zero(b)?;
@@ -110,7 +101,7 @@ impl std::ops::Div<Number> for Number {
                 check_division_by_zero(b1)?;
                 check_division_by_zero(a2)?;
                 check_division_by_zero(b2)?;
-                Ok(Number::Rational(a1 / b1, a2 / b2))
+                Ok(Number::Rational(a1 * b2, a2 * b1))
             }
         }
     }
@@ -133,19 +124,14 @@ impl fmt::Display for ValueType {
     }
 }
 
-pub fn parse(s: &str) -> Result<Option<Box<Expression>>, SyntaxError> {
-    let mut parser = Parser::new(TokenGenerator::new(s.chars()));
-    parser.parse()
-}
-
-fn check_division_by_zero(num: i64) -> Result<(), LogicError> {
+fn check_division_by_zero(num: i64) -> Result<()> {
     match num {
         0 => logic_error!("division by exact zero"),
         _ => Ok(()),
     }
 }
 
-fn arithmetic_operators(ident: &str, a: Number, b: Number) -> Result<Number, LogicError> {
+fn arithmetic_operators(ident: &str, a: Number, b: Number) -> Result<Number> {
     Ok(match ident {
         "+" => a + b,
         "-" => a - b,
@@ -155,7 +141,7 @@ fn arithmetic_operators(ident: &str, a: Number, b: Number) -> Result<Number, Log
     })
 }
 
-fn buildin_procedural(ident: &str, args: &Vec<ValueType>) -> Result<Option<ValueType>, LogicError> {
+fn buildin_procedural(ident: &str, args: &Vec<ValueType>) -> Result<Option<ValueType>> {
     let mut iter = args.iter();
     match ident {
         // arithmetic
@@ -169,7 +155,7 @@ fn buildin_procedural(ident: &str, args: &Vec<ValueType>) -> Result<Option<Value
                 _ => logic_error!("unrecognized procedure {}", ident),
             };
 
-            let result: Result<ValueType, LogicError> =
+            let result: Result<ValueType> =
                 iter.try_fold(init, |ValueType::Number(a), ValueType::Number(b)| {
                     Ok(ValueType::Number(arithmetic_operators(ident, a, *b)?))
                 });
@@ -179,12 +165,12 @@ fn buildin_procedural(ident: &str, args: &Vec<ValueType>) -> Result<Option<Value
     }
 }
 
-pub fn eval(ast: &Expression) -> Result<ValueType, LogicError> {
+pub fn eval_ast(ast: &Expression) -> Result<ValueType> {
     Ok(match ast {
         Expression::ProcudureCall(procedure, arguments) => {
             let mut evaluated_args = vec![];
             for arg in arguments {
-                evaluated_args.push(eval(arg)?);
+                evaluated_args.push(eval_ast(arg)?);
             }
             match procedure.as_ref() {
                 Expression::Identifier(ident) => {
@@ -206,27 +192,31 @@ pub fn eval(ast: &Expression) -> Result<ValueType, LogicError> {
     })
 }
 
+// pub fn eval(source: &str) -> std::result::Result<ValueType, std::error::Error> {
+//     Parser::new(TokenGenerator::new(s.chars()));
+// }
+
 #[test]
-fn number() -> Result<(), LogicError> {
+fn number() -> Result<()> {
     assert_eq!(
-        eval(&Expression::Interger(-1))?,
+        eval_ast(&Expression::Interger(-1))?,
         ValueType::Number(Number::Interger(-1))
     );
     assert_eq!(
-        eval(&Expression::Rational(1, 3))?,
+        eval_ast(&Expression::Rational(1, 3))?,
         ValueType::Number(Number::Rational(1, 3))
     );
     assert_eq!(
-        eval(&Expression::Demicals("-3.45e-7".to_string()))?,
+        eval_ast(&Expression::Demicals("-3.45e-7".to_string()))?,
         ValueType::Number(Number::Demicals(-3.45e-7))
     );
     Ok(())
 }
 
 #[test]
-fn arithmetic() -> Result<(), LogicError> {
+fn arithmetic() -> Result<()> {
     assert_eq!(
-        eval(&Expression::ProcudureCall(
+        eval_ast(&Expression::ProcudureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Interger(1)),
@@ -237,7 +227,7 @@ fn arithmetic() -> Result<(), LogicError> {
     );
 
     assert_eq!(
-        eval(&Expression::ProcudureCall(
+        eval_ast(&Expression::ProcudureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Interger(1)),
@@ -248,7 +238,7 @@ fn arithmetic() -> Result<(), LogicError> {
     );
 
     assert_eq!(
-        eval(&Expression::ProcudureCall(
+        eval_ast(&Expression::ProcudureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Rational(1, 2)),
@@ -259,15 +249,16 @@ fn arithmetic() -> Result<(), LogicError> {
     );
 
     assert_eq!(
-        eval(&Expression::ProcudureCall(
+        eval_ast(&Expression::ProcudureCall(
             Box::new(Expression::Identifier("/".to_string())),
             vec![
                 Box::new(Expression::Interger(1)),
                 Box::new(Expression::Interger(0)),
             ]
         )),
-        Err(LogicError {
-            error: "division by exact zero".to_string()
+        Err(Error {
+            category: ErrorType::Logic,
+            message: "division by exact zero".to_string()
         }),
     );
     Ok(())
@@ -276,9 +267,10 @@ fn arithmetic() -> Result<(), LogicError> {
 #[test]
 fn undefined() {
     assert_eq!(
-        eval(&Expression::Identifier("foo".to_string())),
-        Err(LogicError {
-            error: "undefined identifier: foo".to_string(),
+        eval_ast(&Expression::Identifier("foo".to_string())),
+        Err(Error {
+            category: ErrorType::Logic,
+            message: "undefined identifier: foo".to_string(),
         })
     );
 }
