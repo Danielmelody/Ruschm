@@ -1,7 +1,7 @@
 [package]
 name = "rust-scheme"
-version = "0.1.1-alpha.6"
-authors = ["Danielhu <yimingdz@gmail.com>", "hrl <cxghrl@gmail.com>"]
+version = "0.1.1-alpha.7"
+authors = ["Danielhu <yimingdz@gmail.com>", "hrl <cxghrl@gmail.com>", "Milo Yip <miloyip@gmail.com>", "xu0o0 <hqcat6@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/Danielhu229/RustScheme"
 description = "Scheme(R7RS) interpretor/compiler rust implementation"
