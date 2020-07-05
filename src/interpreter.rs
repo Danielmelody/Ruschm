@@ -1,5 +1,8 @@
+#![allow(dead_code)]
+use crate::env::Environment;
 use crate::error::*;
 use crate::parser::*;
+use std::cell::RefCell;
 use std::fmt;
 
 type Result<T> = std::result::Result<T, Error>;
@@ -108,18 +111,26 @@ impl std::ops::Div<Number> for Number {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Procedure {
+    formals: Vec<String>,
+    body: Expression,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
     Number(Number),
+    Procedure(Procedure),
 }
 
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
+        match self {
             ValueType::Number(num) => match num {
                 Number::Interger(n) => write!(f, "{}", n),
                 Number::Demicals(n) => write!(f, "{}", n),
                 Number::Rational(a, b) => write!(f, "{}/{}", a, b),
             },
+            ValueType::Procedure(_) => write!(f, "Procedure"),
         }
     }
 }
@@ -141,7 +152,7 @@ fn arithmetic_operators(ident: &str, a: Number, b: Number) -> Result<Number> {
     })
 }
 
-fn buildin_procedural(ident: &str, args: &Vec<ValueType>) -> Result<Option<ValueType>> {
+fn buildin_procedural<'a>(ident: &str, args: &Vec<ValueType>) -> Result<Option<ValueType>> {
     let mut iter = args.iter();
     match ident {
         // arithmetic
@@ -155,59 +166,139 @@ fn buildin_procedural(ident: &str, args: &Vec<ValueType>) -> Result<Option<Value
                 _ => logic_error!("unrecognized procedure {}", ident),
             };
 
-            let result: Result<ValueType> =
-                iter.try_fold(init, |ValueType::Number(a), ValueType::Number(b)| {
-                    Ok(ValueType::Number(arithmetic_operators(ident, a, *b)?))
-                });
+            let result: Result<ValueType> = iter.try_fold(init, |a, b| match (a, b) {
+                (ValueType::Number(num1), ValueType::Number(num2)) => {
+                    Ok(ValueType::Number(arithmetic_operators(ident, num1, *num2)?))
+                }
+                _ => logic_error!("expect a number!"),
+            });
             result.map(|val| Some(val))
         }
         _ => Ok(None),
     }
 }
 
-pub fn eval_ast(ast: &Expression) -> Result<ValueType> {
-    Ok(match ast {
-        Expression::ProcudureCall(procedure, arguments) => {
-            let mut evaluated_args = vec![];
-            for arg in arguments {
-                evaluated_args.push(eval_ast(arg)?);
-            }
-            match procedure.as_ref() {
-                Expression::Identifier(ident) => {
-                    match buildin_procedural(ident.as_str(), &evaluated_args)? {
-                        Some(value) => value,
-                        None => logic_error!("undefined identifier: {}", ident),
-                    }
-                }
-                _ => logic_error!("expect a procedure here"),
-            }
-        }
-        Expression::Interger(value) => ValueType::Number(Number::Interger(*value)),
-        Expression::Demicals(number_literal) => {
-            ValueType::Number(Number::Demicals(number_literal.parse::<f64>().unwrap()))
-        }
-        // TODO: apply gcd here.
-        Expression::Rational(a, b) => ValueType::Number(Number::Rational(*a, *b as i64)),
-        Expression::Identifier(ident) => logic_error!("undefined identifier: {}", ident),
-    })
+// pub fn procedure_call(procedure: &Procedure, args: Vec<ValueType>, env: &Environment) {}
+
+pub struct Interpreter<'a> {
+    env: RefCell<Environment<'a>>,
 }
 
-// pub fn eval(source: &str) -> std::result::Result<ValueType, std::error::Error> {
-//     Parser::new(TokenGenerator::new(s.chars()));
-// }
+impl<'a> Interpreter<'a> {
+    pub fn new() -> Self {
+        Self {
+            env: RefCell::new(Environment::new()),
+        }
+    }
+
+    pub fn define<'b>(
+        &self,
+        definition: &Definition,
+        env: &'b RefCell<Environment<'b>>,
+    ) -> Result<()> {
+        let Definition(name, expression) = definition;
+        let value = self.eval_expression(&expression, env)?;
+        env.borrow_mut().define(name.clone(), value);
+        Ok(())
+    }
+
+    pub fn eval_root_expression(&'a self, expression: Expression) -> Result<ValueType> {
+        self.eval_expression(&expression, &self.env)
+    }
+
+    pub fn eval_expression<'b>(
+        &self,
+        expression: &Expression,
+        env: &'b RefCell<Environment<'b>>,
+    ) -> Result<ValueType> {
+        Ok(match expression {
+            Expression::ProcedureCall(procedure, arguments) => {
+                let mut evaluated_args = vec![];
+                for arg in arguments {
+                    evaluated_args.push(self.eval_expression(arg, env)?);
+                }
+                let parent_env = &env.borrow();
+                match procedure.as_ref() {
+                    Expression::Identifier(ident) => {
+                        match buildin_procedural(ident.as_str(), &evaluated_args)? {
+                            Some(value) => value,
+                            None => match parent_env.get(ident.as_str()) {
+                                Some(ValueType::Procedure(procedure)) => {
+                                    let child_env = RefCell::new(Environment::child(parent_env));
+                                    for (param, arg) in
+                                        procedure.formals.iter().zip(evaluated_args.iter())
+                                    {
+                                        child_env.borrow_mut().define(param.clone(), arg.clone());
+                                    }
+                                    self.eval_expression(&procedure.body, &child_env)?
+                                }
+                                Some(other) => logic_error!("{} is not callable", other),
+                                None => {
+                                    logic_error!("try to call an undefined identifier: {}", ident)
+                                }
+                            },
+                        }
+                    }
+                    _ => logic_error!("expect a procedure here"),
+                }
+            }
+            Expression::Procedure(formals, body) => ValueType::Procedure(Procedure {
+                formals: formals.clone(),
+                body: *body.clone(),
+            }),
+            Expression::Interger(value) => ValueType::Number(Number::Interger(*value)),
+            Expression::Demicals(number_literal) => {
+                ValueType::Number(Number::Demicals(number_literal.parse::<f64>().unwrap()))
+            }
+            // TODO: apply gcd here.
+            Expression::Rational(a, b) => ValueType::Number(Number::Rational(*a, *b as i64)),
+            Expression::Identifier(ident) => match env.borrow().get(ident.as_str()) {
+                Some(value) => value.clone(),
+                None => logic_error!("undefined identifier: {}", ident),
+            },
+        })
+    }
+
+    pub fn eval_ast<'b>(
+        &self,
+        ast: &Statement,
+        env: &'b RefCell<Environment<'b>>,
+    ) -> Result<Option<ValueType>> {
+        Ok(match ast {
+            Statement::Expression(expr) => Some(self.eval_expression(&expr, env)?),
+            Statement::Definition(definition) => {
+                self.define(definition, env)?;
+                None
+            }
+        })
+    }
+
+    pub fn eval_root_ast(&'a self, ast: &Statement) -> Result<Option<ValueType>> {
+        self.eval_ast(ast, &self.env)
+    }
+
+    pub fn eval_program(
+        &'a self,
+        asts: impl IntoIterator<Item = &'a Statement>,
+    ) -> Result<Option<ValueType>> {
+        asts.into_iter()
+            .try_fold(None, |_, ast| self.eval_root_ast(ast))
+    }
+}
 
 #[test]
 fn number() -> Result<()> {
+    let interpreter = Interpreter::new();
     assert_eq!(
-        eval_ast(&Expression::Interger(-1))?,
+        interpreter.eval_root_expression(Expression::Interger(-1))?,
         ValueType::Number(Number::Interger(-1))
     );
     assert_eq!(
-        eval_ast(&Expression::Rational(1, 3))?,
+        interpreter.eval_root_expression(Expression::Rational(1, 3))?,
         ValueType::Number(Number::Rational(1, 3))
     );
     assert_eq!(
-        eval_ast(&Expression::Demicals("-3.45e-7".to_string()))?,
+        interpreter.eval_root_expression(Expression::Demicals("-3.45e-7".to_string()))?,
         ValueType::Number(Number::Demicals(-3.45e-7))
     );
     Ok(())
@@ -215,8 +306,9 @@ fn number() -> Result<()> {
 
 #[test]
 fn arithmetic() -> Result<()> {
+    let interpreter = Interpreter::new();
     assert_eq!(
-        eval_ast(&Expression::ProcudureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Interger(1)),
@@ -227,7 +319,7 @@ fn arithmetic() -> Result<()> {
     );
 
     assert_eq!(
-        eval_ast(&Expression::ProcudureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Interger(1)),
@@ -238,7 +330,7 @@ fn arithmetic() -> Result<()> {
     );
 
     assert_eq!(
-        eval_ast(&Expression::ProcudureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Rational(1, 2)),
@@ -249,7 +341,7 @@ fn arithmetic() -> Result<()> {
     );
 
     assert_eq!(
-        eval_ast(&Expression::ProcudureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("/".to_string())),
             vec![
                 Box::new(Expression::Interger(1)),
@@ -266,11 +358,138 @@ fn arithmetic() -> Result<()> {
 
 #[test]
 fn undefined() {
+    let interpreter = Interpreter::new();
     assert_eq!(
-        eval_ast(&Expression::Identifier("foo".to_string())),
+        interpreter.eval_root_expression(Expression::Identifier("foo".to_string())),
         Err(Error {
             category: ErrorType::Logic,
             message: "undefined identifier: foo".to_string(),
         })
     );
+}
+
+#[test]
+fn variable_definition() -> Result<()> {
+    let interpreter = Interpreter::new();
+    let program = vec![
+        Statement::Definition(Definition("a".to_string(), Expression::Interger(1))),
+        Statement::Definition(Definition(
+            "b".to_string(),
+            Expression::Identifier("a".to_string()),
+        )),
+        Statement::Expression(Expression::Identifier("b".to_string())),
+    ];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(ValueType::Number(Number::Interger(1)))
+    );
+    Ok(())
+}
+
+#[test]
+fn procedure_definition() -> Result<()> {
+    let interpreter = Interpreter::new();
+    let program = vec![
+        Statement::Definition(Definition(
+            "add".to_string(),
+            Expression::Procedure(
+                vec!["x".to_string(), "y".to_string()],
+                Box::new(Expression::ProcedureCall(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![
+                        Box::new(Expression::Identifier("x".to_string())),
+                        Box::new(Expression::Identifier("y".to_string())),
+                    ],
+                )),
+            ),
+        )),
+        Statement::Expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("add".to_string())),
+            vec![
+                Box::new(Expression::Interger(1)),
+                Box::new(Expression::Interger(2)),
+            ],
+        )),
+    ];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(ValueType::Number(Number::Interger(3)))
+    );
+    Ok(())
+}
+
+#[test]
+fn local_environment() -> Result<()> {
+    let interpreter = Interpreter::new();
+    let program = vec![
+        Statement::Definition(Definition(
+            "adda".to_string(),
+            Expression::Procedure(
+                vec!["x".to_string()],
+                Box::new(Expression::ProcedureCall(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![
+                        Box::new(Expression::Identifier("x".to_string())),
+                        Box::new(Expression::Identifier("a".to_string())),
+                    ],
+                )),
+            ),
+        )),
+        Statement::Definition(Definition("a".to_string(), Expression::Interger(1))),
+        Statement::Expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("adda".to_string())),
+            vec![Box::new(Expression::Interger(2))],
+        )),
+    ];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(ValueType::Number(Number::Interger(3)))
+    );
+    Ok(())
+}
+
+#[test]
+fn procedure_as_data() -> Result<()> {
+    let interpreter = Interpreter::new();
+    let program = vec![
+        Statement::Definition(Definition(
+            "add".to_string(),
+            Expression::Procedure(
+                vec!["x".to_string(), "y".to_string()],
+                Box::new(Expression::ProcedureCall(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![
+                        Box::new(Expression::Identifier("x".to_string())),
+                        Box::new(Expression::Identifier("y".to_string())),
+                    ],
+                )),
+            ),
+        )),
+        Statement::Definition(Definition(
+            "apply-op".to_string(),
+            Expression::Procedure(
+                vec!["op".to_string(), "x".to_string(), "y".to_string()],
+                Box::new(Expression::ProcedureCall(
+                    Box::new(Expression::Identifier("op".to_string())),
+                    vec![
+                        Box::new(Expression::Identifier("x".to_string())),
+                        Box::new(Expression::Identifier("y".to_string())),
+                    ],
+                )),
+            ),
+        )),
+        Statement::Expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("apply-op".to_string())),
+            vec![
+                Box::new(Expression::Identifier("add".to_string())),
+                Box::new(Expression::Interger(1)),
+                Box::new(Expression::Interger(2)),
+            ],
+        )),
+    ];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(ValueType::Number(Number::Interger(3)))
+    );
+    Ok(())
 }
