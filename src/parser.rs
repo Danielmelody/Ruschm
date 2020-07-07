@@ -109,7 +109,10 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
         self.advance();
         let mut formals = vec![];
         match self.advance().take() {
-            Some(Token::Identifier(ident)) => formals.push(ident),
+            Some(Token::Identifier(ident)) => {
+                formals.push(ident);
+                self.advance();
+            }
             Some(Token::LeftParen) => formals = self.collect_formals()?,
             _ => syntax_error!("expect identifiers"),
         }

@@ -192,7 +192,7 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn define<'b>(
-        &self,
+        &'a self,
         definition: &Definition,
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<()> {
@@ -202,12 +202,26 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
+    fn eval_scheme_procedure<'b>(
+        &'a self,
+        formals: &Vec<String>,
+        body: &Expression,
+        args: impl Iterator<Item = ValueType>,
+        parent_env: &'b Environment<'b>,
+    ) -> Result<ValueType> {
+        let child_env = RefCell::new(Environment::child(parent_env));
+        for (param, arg) in formals.iter().zip(args) {
+            child_env.borrow_mut().define(param.clone(), arg.clone());
+        }
+        self.eval_expression(&body, &child_env)
+    }
+
     pub fn eval_root_expression(&'a self, expression: Expression) -> Result<ValueType> {
         self.eval_expression(&expression, &self.env)
     }
 
     pub fn eval_expression<'b>(
-        &self,
+        &'a self,
         expression: &Expression,
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<ValueType> {
@@ -223,15 +237,13 @@ impl<'a> Interpreter<'a> {
                         match buildin_procedural(ident.as_str(), &evaluated_args)? {
                             Some(value) => value,
                             None => match parent_env.get(ident.as_str()) {
-                                Some(ValueType::Procedure(procedure)) => {
-                                    let child_env = RefCell::new(Environment::child(parent_env));
-                                    for (param, arg) in
-                                        procedure.formals.iter().zip(evaluated_args.iter())
-                                    {
-                                        child_env.borrow_mut().define(param.clone(), arg.clone());
-                                    }
-                                    self.eval_expression(&procedure.body, &child_env)?
-                                }
+                                Some(ValueType::Procedure(procedure)) => self
+                                    .eval_scheme_procedure(
+                                        &procedure.formals,
+                                        &procedure.body,
+                                        evaluated_args.into_iter(),
+                                        parent_env,
+                                    )?,
                                 Some(other) => logic_error!("{} is not callable", other),
                                 None => {
                                     logic_error!("try to call an undefined identifier: {}", ident)
@@ -239,6 +251,12 @@ impl<'a> Interpreter<'a> {
                             },
                         }
                     }
+                    Expression::Procedure(formals, body) => self.eval_scheme_procedure(
+                        formals,
+                        body,
+                        evaluated_args.into_iter(),
+                        parent_env,
+                    )?,
                     _ => logic_error!("expect a procedure here"),
                 }
             }
@@ -260,7 +278,7 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn eval_ast<'b>(
-        &self,
+        &'a self,
         ast: &Statement,
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<Option<ValueType>> {
@@ -411,6 +429,31 @@ fn procedure_definition() -> Result<()> {
             ],
         )),
     ];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(ValueType::Number(Number::Interger(3)))
+    );
+    Ok(())
+}
+#[test]
+fn lambda_call() -> Result<()> {
+    let interpreter = Interpreter::new();
+    let program = vec![Statement::Expression(Expression::ProcedureCall(
+        Box::new(Expression::Procedure(
+            vec!["x".to_string(), "y".to_string()],
+            Box::new(Expression::ProcedureCall(
+                Box::new(Expression::Identifier("+".to_string())),
+                vec![
+                    Box::new(Expression::Identifier("x".to_string())),
+                    Box::new(Expression::Identifier("y".to_string())),
+                ],
+            )),
+        )),
+        vec![
+            Box::new(Expression::Interger(1)),
+            Box::new(Expression::Interger(2)),
+        ],
+    ))];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
         Some(ValueType::Number(Number::Interger(3)))
