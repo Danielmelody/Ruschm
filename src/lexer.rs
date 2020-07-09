@@ -16,8 +16,8 @@ macro_rules! invalid_token {
 pub enum Token {
     Identifier(String),
     Boolean(bool),
-    Demicals(String), // delay the conversion of demical literal to internal represent for different virtual machines (for example, fixed-points).
-    Interger(i64),
+    Real(String), // delay the conversion of demical literal to internal represent for different virtual machines (for example, fixed-points).
+    Integer(i64),
     Rational(i64, u64),
     Character(char),
     String(String),
@@ -352,7 +352,7 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
         self.digital10(number_literal)
     }
 
-    fn demical(&mut self, number_literal: &mut String) -> Result<()> {
+    fn real(&mut self, number_literal: &mut String) -> Result<()> {
         number_literal.push('.');
         match self.nextchar() {
             Some(nc) => match nc {
@@ -395,11 +395,11 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
                             }
                             'e' => {
                                 self.number_suffix(&mut number_literal)?;
-                                break Ok(Some(Token::Demicals(number_literal)));
+                                break Ok(Some(Token::Real(number_literal)));
                             }
                             '.' => {
-                                self.demical(&mut number_literal)?;
-                                break Ok(Some(Token::Demicals(number_literal)));
+                                self.real(&mut number_literal)?;
+                                break Ok(Some(Token::Real(number_literal)));
                             }
                             '/' => {
                                 let mut denominator = String::new();
@@ -411,15 +411,13 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
                             }
                             _ => {
                                 test_delimiter(nc)?;
-                                break Ok(Some(Token::Interger(
+                                break Ok(Some(Token::Integer(
                                     number_literal.parse::<i64>().unwrap(),
                                 )));
                             }
                         },
                         None => {
-                            break Ok(Some(Token::Interger(
-                                number_literal.parse::<i64>().unwrap(),
-                            )))
+                            break Ok(Some(Token::Integer(number_literal.parse::<i64>().unwrap())))
                         }
                     }
                 }
@@ -543,19 +541,19 @@ fn number() -> Result<()> {
     assert_eq!(
         result?,
         vec![
-            Token::Interger(123),
-            Token::Interger(123),
-            Token::Interger(-123),
-            Token::Demicals("1.23".to_string()),
-            Token::Demicals("-12.34".to_string()),
-            Token::Demicals("1.".to_string()),
-            Token::Demicals("0.".to_string()),
-            Token::Demicals("+.0".to_string()),
-            Token::Demicals("-.1".to_string()),
-            Token::Demicals("1e10".to_string()),
-            Token::Demicals("1.3e20".to_string()),
-            Token::Demicals("-43.e-12".to_string()),
-            Token::Demicals("+.12e+12".to_string()),
+            Token::Integer(123),
+            Token::Integer(123),
+            Token::Integer(-123),
+            Token::Real("1.23".to_string()),
+            Token::Real("-12.34".to_string()),
+            Token::Real("1.".to_string()),
+            Token::Real("0.".to_string()),
+            Token::Real("+.0".to_string()),
+            Token::Real("-.1".to_string()),
+            Token::Real("1e10".to_string()),
+            Token::Real("1.3e20".to_string()),
+            Token::Real("-43.e-12".to_string()),
+            Token::Real("+.12e+12".to_string()),
             Token::Rational(1, 2),
             Token::Rational(1, 2),
             Token::Rational(-32, 3),
@@ -574,11 +572,11 @@ fn atmosphere() -> Result<()> {
         vec![
             Token::LeftParen,
             Token::Identifier(String::from("-")),
-            Token::Interger(4),
+            Token::Integer(4),
             Token::LeftParen,
             Token::Identifier(String::from("+")),
-            Token::Interger(1),
-            Token::Interger(2),
+            Token::Integer(1),
+            Token::Integer(2),
             Token::RightParen,
             Token::RightParen
         ]

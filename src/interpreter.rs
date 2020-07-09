@@ -15,36 +15,36 @@ macro_rules! logic_error {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Number {
-    Interger(i64),
-    Demicals(f64),
+    Integer(i64),
+    Real(f64),
     Rational(i64, i64),
 }
 
 enum NumberBinaryOperand {
-    Interger(i64, i64),
-    Demicals(f64, f64),
+    Integer(i64, i64),
+    Real(f64, f64),
     Rational(i64, i64, i64, i64),
 }
 
-// Interger => Rational => Demicals
+// Integer => Rational => Real
 fn upcast_oprands(operand: (Number, Number)) -> NumberBinaryOperand {
     match operand {
-        (Number::Rational(dividend, dividor), Number::Demicals(b)) => {
-            NumberBinaryOperand::Demicals(dividend as f64 / dividor as f64, b)
+        (Number::Rational(dividend, dividor), Number::Real(b)) => {
+            NumberBinaryOperand::Real(dividend as f64 / dividor as f64, b)
         }
-        (Number::Demicals(a), Number::Rational(dividend, dividor)) => {
-            NumberBinaryOperand::Demicals(a, dividend as f64 / dividor as f64)
+        (Number::Real(a), Number::Rational(dividend, dividor)) => {
+            NumberBinaryOperand::Real(a, dividend as f64 / dividor as f64)
         }
-        (Number::Interger(a), Number::Demicals(b)) => (NumberBinaryOperand::Demicals(a as f64, b)),
-        (Number::Demicals(a), Number::Interger(b)) => (NumberBinaryOperand::Demicals(a, b as f64)),
-        (Number::Rational(dividend, dividor), Number::Interger(b)) => {
+        (Number::Integer(a), Number::Real(b)) => (NumberBinaryOperand::Real(a as f64, b)),
+        (Number::Real(a), Number::Integer(b)) => (NumberBinaryOperand::Real(a, b as f64)),
+        (Number::Rational(dividend, dividor), Number::Integer(b)) => {
             NumberBinaryOperand::Rational(dividend, dividor, b, 1)
         }
-        (Number::Interger(a), Number::Rational(dividend, dividor)) => {
+        (Number::Integer(a), Number::Rational(dividend, dividor)) => {
             NumberBinaryOperand::Rational(a, 1, dividend, dividor)
         }
-        (Number::Interger(a), Number::Interger(b)) => (NumberBinaryOperand::Interger(a, b)),
-        (Number::Demicals(a), Number::Demicals(b)) => (NumberBinaryOperand::Demicals(a, b)),
+        (Number::Integer(a), Number::Integer(b)) => (NumberBinaryOperand::Integer(a, b)),
+        (Number::Real(a), Number::Real(b)) => (NumberBinaryOperand::Real(a, b)),
         (Number::Rational(a1, a2), Number::Rational(b1, b2)) => {
             NumberBinaryOperand::Rational(a1, a2, b1, b2)
         }
@@ -55,8 +55,8 @@ impl std::ops::Add<Number> for Number {
     type Output = Number;
     fn add(self, rhs: Number) -> Number {
         match upcast_oprands((self, rhs)) {
-            NumberBinaryOperand::Interger(a, b) => Number::Interger(a + b),
-            NumberBinaryOperand::Demicals(a, b) => Number::Demicals(a + b),
+            NumberBinaryOperand::Integer(a, b) => Number::Integer(a + b),
+            NumberBinaryOperand::Real(a, b) => Number::Real(a + b),
             NumberBinaryOperand::Rational(a1, a2, b1, b2) => {
                 Number::Rational(a1 * b2 + a2 * b1, a2 * b2)
             }
@@ -68,8 +68,8 @@ impl std::ops::Sub<Number> for Number {
     type Output = Number;
     fn sub(self, rhs: Number) -> Number {
         match upcast_oprands((self, rhs)) {
-            NumberBinaryOperand::Interger(a, b) => Number::Interger(a - b),
-            NumberBinaryOperand::Demicals(a, b) => Number::Demicals(a - b),
+            NumberBinaryOperand::Integer(a, b) => Number::Integer(a - b),
+            NumberBinaryOperand::Real(a, b) => Number::Real(a - b),
             NumberBinaryOperand::Rational(a1, a2, b1, b2) => {
                 Number::Rational(a1 * b2 - a2 * b1, a2 * b2)
             }
@@ -81,8 +81,8 @@ impl std::ops::Mul<Number> for Number {
     type Output = Number;
     fn mul(self, rhs: Number) -> Number {
         match upcast_oprands((self, rhs)) {
-            NumberBinaryOperand::Interger(a, b) => Number::Interger(a * b),
-            NumberBinaryOperand::Demicals(a, b) => Number::Demicals(a * b),
+            NumberBinaryOperand::Integer(a, b) => Number::Integer(a * b),
+            NumberBinaryOperand::Real(a, b) => Number::Real(a * b),
             NumberBinaryOperand::Rational(a1, a2, b1, b2) => Number::Rational(a1 * b1, a2 * b2),
         }
     }
@@ -92,14 +92,14 @@ impl std::ops::Div<Number> for Number {
     type Output = Result<Number>;
     fn div(self, rhs: Number) -> Result<Number> {
         match upcast_oprands((self, rhs)) {
-            NumberBinaryOperand::Interger(a, b) => {
+            NumberBinaryOperand::Integer(a, b) => {
                 check_division_by_zero(b)?;
                 match a % b {
-                    0 => Ok(Number::Interger(a / b)),
+                    0 => Ok(Number::Integer(a / b)),
                     _ => Ok(Number::Rational(a, b)),
                 }
             }
-            NumberBinaryOperand::Demicals(a, b) => Ok(Number::Demicals(a / b)),
+            NumberBinaryOperand::Real(a, b) => Ok(Number::Real(a / b)),
             NumberBinaryOperand::Rational(a1, a2, b1, b2) => {
                 check_division_by_zero(b1)?;
                 check_division_by_zero(a2)?;
@@ -126,8 +126,8 @@ impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ValueType::Number(num) => match num {
-                Number::Interger(n) => write!(f, "{}", n),
-                Number::Demicals(n) => write!(f, "{}", n),
+                Number::Integer(n) => write!(f, "{}", n),
+                Number::Real(n) => write!(f, "{}", n),
                 Number::Rational(a, b) => write!(f, "{}/{}", a, b),
             },
             ValueType::Procedure(_) => write!(f, "Procedure"),
@@ -160,8 +160,8 @@ fn buildin_procedural<'a>(ident: &str, args: &Vec<ValueType>) -> Result<Option<V
             let init = match (ident, args.len()) {
                 ("-", 0) => logic_error!("'-' needs at least one argument"),
                 ("/", 0) => logic_error!("'/' needs at least one argument"),
-                ("-", 1) | ("+", _) => ValueType::Number(Number::Interger(0)),
-                ("/", 1) | ("*", _) => ValueType::Number(Number::Interger(1)),
+                ("-", 1) | ("+", _) => ValueType::Number(Number::Integer(0)),
+                ("/", 1) | ("*", _) => ValueType::Number(Number::Integer(1)),
                 ("-", _) | ("/", _) => iter.next().unwrap().clone(),
                 _ => logic_error!("unrecognized procedure {}", ident),
             };
@@ -264,9 +264,9 @@ impl<'a> Interpreter<'a> {
                 formals: formals.clone(),
                 body: *body.clone(),
             }),
-            Expression::Interger(value) => ValueType::Number(Number::Interger(*value)),
-            Expression::Demicals(number_literal) => {
-                ValueType::Number(Number::Demicals(number_literal.parse::<f64>().unwrap()))
+            Expression::Integer(value) => ValueType::Number(Number::Integer(*value)),
+            Expression::Real(number_literal) => {
+                ValueType::Number(Number::Real(number_literal.parse::<f64>().unwrap()))
             }
             // TODO: apply gcd here.
             Expression::Rational(a, b) => ValueType::Number(Number::Rational(*a, *b as i64)),
@@ -308,16 +308,16 @@ impl<'a> Interpreter<'a> {
 fn number() -> Result<()> {
     let interpreter = Interpreter::new();
     assert_eq!(
-        interpreter.eval_root_expression(Expression::Interger(-1))?,
-        ValueType::Number(Number::Interger(-1))
+        interpreter.eval_root_expression(Expression::Integer(-1))?,
+        ValueType::Number(Number::Integer(-1))
     );
     assert_eq!(
         interpreter.eval_root_expression(Expression::Rational(1, 3))?,
         ValueType::Number(Number::Rational(1, 3))
     );
     assert_eq!(
-        interpreter.eval_root_expression(Expression::Demicals("-3.45e-7".to_string()))?,
-        ValueType::Number(Number::Demicals(-3.45e-7))
+        interpreter.eval_root_expression(Expression::Real("-3.45e-7".to_string()))?,
+        ValueType::Number(Number::Real(-3.45e-7))
     );
     Ok(())
 }
@@ -329,18 +329,18 @@ fn arithmetic() -> Result<()> {
         interpreter.eval_root_expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
-                Box::new(Expression::Interger(1)),
-                Box::new(Expression::Interger(2))
+                Box::new(Expression::Integer(1)),
+                Box::new(Expression::Integer(2))
             ]
         ))?,
-        ValueType::Number(Number::Interger(3))
+        ValueType::Number(Number::Integer(3))
     );
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
-                Box::new(Expression::Interger(1)),
+                Box::new(Expression::Integer(1)),
                 Box::new(Expression::Rational(1, 2))
             ]
         ))?,
@@ -352,18 +352,18 @@ fn arithmetic() -> Result<()> {
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Box::new(Expression::Rational(1, 2)),
-                Box::new(Expression::Demicals("0.5".to_string())),
+                Box::new(Expression::Real("0.5".to_string())),
             ]
         ))?,
-        ValueType::Number(Number::Demicals(1.0)),
+        ValueType::Number(Number::Real(1.0)),
     );
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("/".to_string())),
             vec![
-                Box::new(Expression::Interger(1)),
-                Box::new(Expression::Interger(0)),
+                Box::new(Expression::Integer(1)),
+                Box::new(Expression::Integer(0)),
             ]
         )),
         Err(Error {
@@ -390,7 +390,7 @@ fn undefined() {
 fn variable_definition() -> Result<()> {
     let interpreter = Interpreter::new();
     let program = vec![
-        Statement::Definition(Definition("a".to_string(), Expression::Interger(1))),
+        Statement::Definition(Definition("a".to_string(), Expression::Integer(1))),
         Statement::Definition(Definition(
             "b".to_string(),
             Expression::Identifier("a".to_string()),
@@ -399,7 +399,7 @@ fn variable_definition() -> Result<()> {
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
-        Some(ValueType::Number(Number::Interger(1)))
+        Some(ValueType::Number(Number::Integer(1)))
     );
     Ok(())
 }
@@ -424,14 +424,14 @@ fn procedure_definition() -> Result<()> {
         Statement::Expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("add".to_string())),
             vec![
-                Box::new(Expression::Interger(1)),
-                Box::new(Expression::Interger(2)),
+                Box::new(Expression::Integer(1)),
+                Box::new(Expression::Integer(2)),
             ],
         )),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
-        Some(ValueType::Number(Number::Interger(3)))
+        Some(ValueType::Number(Number::Integer(3)))
     );
     Ok(())
 }
@@ -450,13 +450,13 @@ fn lambda_call() -> Result<()> {
             )),
         )),
         vec![
-            Box::new(Expression::Interger(1)),
-            Box::new(Expression::Interger(2)),
+            Box::new(Expression::Integer(1)),
+            Box::new(Expression::Integer(2)),
         ],
     ))];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
-        Some(ValueType::Number(Number::Interger(3)))
+        Some(ValueType::Number(Number::Integer(3)))
     );
     Ok(())
 }
@@ -478,15 +478,15 @@ fn local_environment() -> Result<()> {
                 )),
             ),
         )),
-        Statement::Definition(Definition("a".to_string(), Expression::Interger(1))),
+        Statement::Definition(Definition("a".to_string(), Expression::Integer(1))),
         Statement::Expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("adda".to_string())),
-            vec![Box::new(Expression::Interger(2))],
+            vec![Box::new(Expression::Integer(2))],
         )),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
-        Some(ValueType::Number(Number::Interger(3)))
+        Some(ValueType::Number(Number::Integer(3)))
     );
     Ok(())
 }
@@ -525,14 +525,14 @@ fn procedure_as_data() -> Result<()> {
             Box::new(Expression::Identifier("apply-op".to_string())),
             vec![
                 Box::new(Expression::Identifier("add".to_string())),
-                Box::new(Expression::Interger(1)),
-                Box::new(Expression::Interger(2)),
+                Box::new(Expression::Integer(1)),
+                Box::new(Expression::Integer(2)),
             ],
         )),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
-        Some(ValueType::Number(Number::Interger(3)))
+        Some(ValueType::Number(Number::Integer(3)))
     );
     Ok(())
 }
