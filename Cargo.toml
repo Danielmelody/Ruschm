@@ -1,6 +1,6 @@
 [package]
 name = "rust-scheme"
-version = "0.1.2-alpha.1"
+version = "0.1.2-alpha.2"
 authors = ["Danielhu <yimingdz@gmail.com>", "hrl <cxghrl@gmail.com>", "Milo Yip <miloyip@gmail.com>", "xu0o0 <hqcat6@gmail.com>"]
 edition = "2018"
 repository = "https://github.com/Danielhu229/RustScheme"
