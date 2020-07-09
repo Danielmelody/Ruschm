@@ -36,8 +36,8 @@ pub struct Definition(pub String, pub Expression);
 #[derive(PartialEq, Debug, Clone)]
 pub enum Expression {
     Identifier(String),
-    Interger(i64),
-    Demicals(String),
+    Integer(i64),
+    Real(String),
     Rational(i64, u64),
     Procedure(Vec<String>, Box<Expression>),
     ProcedureCall(Box<Expression>, Vec<Box<Expression>>),
@@ -66,8 +66,8 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     pub fn parse(&mut self) -> Result<Statement> {
         match self.current.take() {
             Some(token) => match token {
-                Token::Interger(a) => self.generate(expr_to_statement!(Expression::Interger(a))),
-                Token::Demicals(a) => self.generate(expr_to_statement!(Expression::Demicals(a))),
+                Token::Integer(a) => self.generate(expr_to_statement!(Expression::Integer(a))),
+                Token::Real(a) => self.generate(expr_to_statement!(Expression::Real(a))),
                 Token::Rational(a, b) => {
                     self.generate(expr_to_statement!(Expression::Rational(a, b)))
                 }
@@ -203,23 +203,20 @@ fn empty() -> Result<()> {
 }
 
 #[test]
-fn interger() -> Result<()> {
-    let tokens = vec![Token::Interger(1)];
+fn integer() -> Result<()> {
+    let tokens = vec![Token::Integer(1)];
     let mut parser = Parser::new(tokens.into_iter());
     let ast = parser.parse()?;
-    assert_eq!(ast, expr_to_statement!(Expression::Interger(1)));
+    assert_eq!(ast, expr_to_statement!(Expression::Integer(1)));
     Ok(())
 }
 
 #[test]
-fn demicals() -> Result<()> {
-    let tokens = vec![Token::Demicals("1.2".to_string())];
+fn real_number() -> Result<()> {
+    let tokens = vec![Token::Real("1.2".to_string())];
     let mut parser = Parser::new(tokens.into_iter());
     let ast = parser.parse()?;
-    assert_eq!(
-        ast,
-        expr_to_statement!(Expression::Demicals("1.2".to_string()))
-    );
+    assert_eq!(ast, expr_to_statement!(Expression::Real("1.2".to_string())));
     Ok(())
 }
 
@@ -249,9 +246,9 @@ fn procedure_call() -> Result<()> {
     let tokens = vec![
         Token::LeftParen,
         Token::Identifier("+".to_string()),
-        Token::Interger(1),
-        Token::Interger(2),
-        Token::Interger(3),
+        Token::Integer(1),
+        Token::Integer(2),
+        Token::Integer(3),
         Token::RightParen,
     ];
     let mut parser = Parser::new(tokens.into_iter());
@@ -261,9 +258,9 @@ fn procedure_call() -> Result<()> {
         expr_to_statement!(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
-                Box::new(Expression::Interger(1)),
-                Box::new(Expression::Interger(2)),
-                Box::new(Expression::Interger(3)),
+                Box::new(Expression::Integer(1)),
+                Box::new(Expression::Integer(2)),
+                Box::new(Expression::Integer(3)),
             ]
         ))
     );
@@ -275,9 +272,9 @@ fn unmatched_parantheses() {
     let tokens = vec![
         Token::LeftParen,
         Token::Identifier("+".to_string()),
-        Token::Interger(1),
-        Token::Interger(2),
-        Token::Interger(3),
+        Token::Integer(1),
+        Token::Integer(2),
+        Token::Integer(3),
     ];
     let mut parser = Parser::new(tokens.into_iter());
     assert_eq!(
@@ -294,11 +291,11 @@ fn nested_procedure_call() -> Result<()> {
     let tokens = vec![
         Token::LeftParen,
         Token::Identifier("+".to_string()),
-        Token::Interger(1),
+        Token::Integer(1),
         Token::LeftParen,
         Token::Identifier("-".to_string()),
-        Token::Interger(2),
-        Token::Interger(3),
+        Token::Integer(2),
+        Token::Integer(3),
         Token::RightParen,
         Token::RightParen,
     ];
@@ -309,12 +306,12 @@ fn nested_procedure_call() -> Result<()> {
         expr_to_statement!(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
-                Box::new(Expression::Interger(1)),
+                Box::new(Expression::Integer(1)),
                 Box::new(Expression::ProcedureCall(
                     Box::new(Expression::Identifier("-".to_string())),
                     vec![
-                        Box::new(Expression::Interger(2)),
-                        Box::new(Expression::Interger(3))
+                        Box::new(Expression::Integer(2)),
+                        Box::new(Expression::Integer(3))
                     ]
                 )),
             ]
