@@ -171,7 +171,7 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
             }
             self.nextchar();
         }
-        Ok(None)
+        self.try_next()
     }
 
     fn normal_identifier(&mut self) -> Result<Option<Token>> {
@@ -586,8 +586,11 @@ fn atmosphere() -> Result<()> {
 
 #[test]
 fn comment() -> Result<()> {
-    let l = TokenGenerator::new("abcd;+-12\t 12".chars());
+    let l = TokenGenerator::new("abcd;+-12\t\n\r 12".chars());
     let result: Result<Vec<_>> = l.collect();
-    assert_eq!(result?, vec![Token::Identifier(String::from("abcd"))]);
+    assert_eq!(
+        result?,
+        vec![Token::Identifier(String::from("abcd")), Token::Integer(12)]
+    );
     Ok(())
 }
