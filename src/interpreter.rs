@@ -283,11 +283,15 @@ impl<'a> Interpreter<'a> {
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<Option<ValueType>> {
         Ok(match ast {
-            Statement::Expression(expr) => Some(self.eval_expression(&expr, env)?),
+            Statement::ImportDeclaration(_) => {
+                // TODO:
+                None
+            }
             Statement::Definition(definition) => {
                 self.define(definition, env)?;
                 None
             }
+            Statement::Expression(expr) => Some(self.eval_expression(&expr, env)?),
         })
     }
 
