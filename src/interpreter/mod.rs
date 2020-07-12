@@ -1,6 +1,7 @@
 #![allow(dead_code)]
-use crate::env::Environment;
 use crate::error::*;
+use crate::interpreter::env::Environment;
+use crate::lexer::*;
 use crate::parser::*;
 use std::cell::RefCell;
 use std::fmt;
@@ -13,6 +14,9 @@ macro_rules! logic_error {
     )
 }
 
+mod env;
+mod scheme;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Number {
     Integer(i64),
@@ -24,6 +28,42 @@ enum NumberBinaryOperand {
     Integer(i64, i64),
     Real(f64, f64),
     Rational(i64, i64, i64, i64),
+}
+
+impl NumberBinaryOperand {
+    pub fn get_max(&self) -> Number {
+        match self {
+            NumberBinaryOperand::Integer(a, b) => match a < b {
+                false => Number::Integer(*a),
+                true => Number::Integer(*b),
+            },
+            NumberBinaryOperand::Real(a, b) => match a < b {
+                false => Number::Real(*a),
+                true => Number::Real(*b),
+            },
+            NumberBinaryOperand::Rational(a1, a2, b1, b2) => match a1 * b2 < b1 * a2 {
+                false => Number::Rational(*a1, *a2),
+                true => Number::Rational(*b1, *b2),
+            },
+        }
+    }
+
+    pub fn get_min(&self) -> Number {
+        match self {
+            NumberBinaryOperand::Integer(a, b) => match a < b {
+                true => Number::Integer(*a),
+                false => Number::Integer(*b),
+            },
+            NumberBinaryOperand::Real(a, b) => match a < b {
+                true => Number::Real(*a),
+                false => Number::Real(*b),
+            },
+            NumberBinaryOperand::Rational(a1, a2, b1, b2) => match a1 * b2 < b1 * a2 {
+                true => Number::Rational(*a1, *a2),
+                false => Number::Rational(*b1, *b2),
+            },
+        }
+    }
 }
 
 // Integer => Rational => Real
@@ -111,9 +151,9 @@ impl std::ops::Div<Number> for Number {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Procedure {
-    formals: Vec<String>,
-    body: Expression,
+pub enum Procedure {
+    User(Vec<String>, Expression),
+    Buildin(fn(arguments: Vec<ValueType>) -> Result<ValueType>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,7 +167,7 @@ impl fmt::Display for ValueType {
         match self {
             ValueType::Number(num) => match num {
                 Number::Integer(n) => write!(f, "{}", n),
-                Number::Real(n) => write!(f, "{}", n),
+                Number::Real(n) => write!(f, "{:?}", n),
                 Number::Rational(a, b) => write!(f, "{}/{}", a, b),
             },
             ValueType::Procedure(_) => write!(f, "Procedure"),
@@ -141,44 +181,6 @@ fn check_division_by_zero(num: i64) -> Result<()> {
         _ => Ok(()),
     }
 }
-
-fn arithmetic_operators(ident: &str, a: Number, b: Number) -> Result<Number> {
-    Ok(match ident {
-        "+" => a + b,
-        "-" => a - b,
-        "*" => a * b,
-        "/" => (a / b)?,
-        _ => logic_error!("unrecognized arithmetic {}", ident),
-    })
-}
-
-fn buildin_procedural<'a>(ident: &str, args: &Vec<ValueType>) -> Result<Option<ValueType>> {
-    let mut iter = args.iter();
-    match ident {
-        // arithmetic
-        "+" | "-" | "*" | "/" => {
-            let init = match (ident, args.len()) {
-                ("-", 0) => logic_error!("'-' needs at least one argument"),
-                ("/", 0) => logic_error!("'/' needs at least one argument"),
-                ("-", 1) | ("+", _) => ValueType::Number(Number::Integer(0)),
-                ("/", 1) | ("*", _) => ValueType::Number(Number::Integer(1)),
-                ("-", _) | ("/", _) => iter.next().unwrap().clone(),
-                _ => logic_error!("unrecognized procedure {}", ident),
-            };
-
-            let result: Result<ValueType> = iter.try_fold(init, |a, b| match (a, b) {
-                (ValueType::Number(num1), ValueType::Number(num2)) => {
-                    Ok(ValueType::Number(arithmetic_operators(ident, num1, *num2)?))
-                }
-                _ => logic_error!("expect a number!"),
-            });
-            result.map(|val| Some(val))
-        }
-        _ => Ok(None),
-    }
-}
-
-// pub fn procedure_call(procedure: &Procedure, args: Vec<ValueType>, env: &Environment) {}
 
 pub struct Interpreter<'a> {
     env: RefCell<Environment<'a>>,
@@ -226,44 +228,30 @@ impl<'a> Interpreter<'a> {
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<ValueType> {
         Ok(match expression {
-            Expression::ProcedureCall(procedure, arguments) => {
+            Expression::ProcedureCall(procedure_expr, arguments) => {
+                let procedure = self.eval_expression(procedure_expr, env)?;
                 let mut evaluated_args = vec![];
                 for arg in arguments {
                     evaluated_args.push(self.eval_expression(arg, env)?);
                 }
                 let parent_env = &env.borrow();
-                match procedure.as_ref() {
-                    Expression::Identifier(ident) => {
-                        match buildin_procedural(ident.as_str(), &evaluated_args)? {
-                            Some(value) => value,
-                            None => match parent_env.get(ident.as_str()) {
-                                Some(ValueType::Procedure(procedure)) => self
-                                    .eval_scheme_procedure(
-                                        &procedure.formals,
-                                        &procedure.body,
-                                        evaluated_args.into_iter(),
-                                        parent_env,
-                                    )?,
-                                Some(other) => logic_error!("{} is not callable", other),
-                                None => {
-                                    logic_error!("try to call an undefined identifier: {}", ident)
-                                }
-                            },
-                        }
+                match procedure {
+                    ValueType::Procedure(Procedure::Buildin(buildin_procedral)) => {
+                        buildin_procedral(evaluated_args)?
                     }
-                    Expression::Procedure(formals, body) => self.eval_scheme_procedure(
-                        formals,
-                        body,
-                        evaluated_args.into_iter(),
-                        parent_env,
-                    )?,
+                    ValueType::Procedure(Procedure::User(formals, body)) => self
+                        .eval_scheme_procedure(
+                            &formals,
+                            &body,
+                            evaluated_args.into_iter(),
+                            parent_env,
+                        )?,
                     _ => logic_error!("expect a procedure here"),
                 }
             }
-            Expression::Procedure(formals, body) => ValueType::Procedure(Procedure {
-                formals: formals.clone(),
-                body: *body.clone(),
-            }),
+            Expression::Procedure(formals, body) => {
+                ValueType::Procedure(Procedure::User(formals.clone(), *body.clone()))
+            }
             Expression::Integer(value) => ValueType::Number(Number::Integer(*value)),
             Expression::Real(number_literal) => {
                 ValueType::Number(Number::Real(number_literal.parse::<f64>().unwrap()))
@@ -283,15 +271,12 @@ impl<'a> Interpreter<'a> {
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<Option<ValueType>> {
         Ok(match ast {
-            Statement::ImportDeclaration(_) => {
-                // TODO:
-                None
-            }
+            Statement::ImportDeclaration(_) => None, // TODO
+            Statement::Expression(expr) => Some(self.eval_expression(&expr, env)?),
             Statement::Definition(definition) => {
                 self.define(definition, env)?;
                 None
             }
-            Statement::Expression(expr) => Some(self.eval_expression(&expr, env)?),
         })
     }
 
@@ -305,6 +290,11 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Option<ValueType>> {
         asts.into_iter()
             .try_fold(None, |_, ast| self.eval_root_ast(ast))
+    }
+
+    pub fn eval(&'a self, char_stream: impl Iterator<Item = char>) -> Result<Option<ValueType>> {
+        let ast: Result<ParseResult> = TokenGenerator::new(char_stream).collect();
+        self.eval_root_ast(&ast??)
     }
 }
 
@@ -353,10 +343,10 @@ fn arithmetic() -> Result<()> {
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::ProcedureCall(
-            Box::new(Expression::Identifier("+".to_string())),
+            Box::new(Expression::Identifier("*".to_string())),
             vec![
                 Box::new(Expression::Rational(1, 2)),
-                Box::new(Expression::Real("0.5".to_string())),
+                Box::new(Expression::Real("2.0".to_string())),
             ]
         ))?,
         ValueType::Number(Number::Real(1.0)),
@@ -375,6 +365,65 @@ fn arithmetic() -> Result<()> {
             message: "division by exact zero".to_string()
         }),
     );
+
+    assert_eq!(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("max".to_string())),
+            vec![
+                Box::new(Expression::Integer(1)),
+                Box::new(Expression::Real("1.3".to_string())),
+            ]
+        ))?,
+        ValueType::Number(Number::Real(1.3)),
+    );
+    assert_eq!(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("min".to_string())),
+            vec![
+                Box::new(Expression::Integer(1)),
+                Box::new(Expression::Real("1.3".to_string())),
+            ]
+        ))?,
+        ValueType::Number(Number::Real(1.0)),
+    );
+    assert_eq!(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("min".to_string())),
+            vec![Box::new(Expression::Identifier("+".to_string())),]
+        )),
+        Err(Error {
+            category: ErrorType::Logic,
+            message: "expect a number!".to_string()
+        }),
+    );
+
+    assert_eq!(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("max".to_string())),
+            vec![Box::new(Expression::Identifier("+".to_string())),]
+        )),
+        Err(Error {
+            category: ErrorType::Logic,
+            message: "expect a number!".to_string()
+        }),
+    );
+
+    assert_eq!(
+        interpreter.eval_root_expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("sqrt".to_string())),
+            vec![Box::new(Expression::Integer(4))]
+        ))?,
+        ValueType::Number(Number::Real(2.0)),
+    );
+
+    match interpreter.eval_root_expression(Expression::ProcedureCall(
+        Box::new(Expression::Identifier("sqrt".to_string())),
+        vec![Box::new(Expression::Integer(-4))],
+    ))? {
+        ValueType::Number(Number::Real(should_be_nan)) => assert!(should_be_nan.is_nan()),
+        _ => panic!("sqrt result should be a number"),
+    }
+
     Ok(())
 }
 
@@ -404,6 +453,32 @@ fn variable_definition() -> Result<()> {
     assert_eq!(
         interpreter.eval_program(program.iter())?,
         Some(ValueType::Number(Number::Integer(1)))
+    );
+    Ok(())
+}
+
+#[test]
+fn buildin_procedural() -> Result<()> {
+    let interpreter = Interpreter::new();
+    let program = vec![
+        Statement::Definition(Definition(
+            "get-add".to_string(),
+            Expression::Procedure(vec![], Box::new(Expression::Identifier("+".to_string()))),
+        )),
+        Statement::Expression(Expression::ProcedureCall(
+            Box::new(Expression::ProcedureCall(
+                Box::new(Expression::Identifier("get-add".to_string())),
+                vec![],
+            )),
+            vec![
+                Box::new(Expression::Integer(1)),
+                Box::new(Expression::Integer(2)),
+            ],
+        )),
+    ];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(ValueType::Number(Number::Integer(3)))
     );
     Ok(())
 }
@@ -439,6 +514,7 @@ fn procedure_definition() -> Result<()> {
     );
     Ok(())
 }
+
 #[test]
 fn lambda_call() -> Result<()> {
     let interpreter = Interpreter::new();

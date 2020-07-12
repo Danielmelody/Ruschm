@@ -1,5 +1,5 @@
 [package]
-name = "rust-scheme"
+name = "ruschm"
 version = "0.1.2-alpha.2"
 authors = ["Danielhu <yimingdz@gmail.com>", "hrl <cxghrl@gmail.com>", "Milo Yip <miloyip@gmail.com>", "xu0o0 <hqcat6@gmail.com>"]
 edition = "2018"
@@ -20,3 +20,6 @@ exclude = [
 
 [lib]
 crate-type = ["lib"]
+
+[dependencies]
+rustyline = "6.2.0"
