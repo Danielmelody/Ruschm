@@ -1,3 +1,4 @@
+use crate::interpreter::scheme;
 use crate::interpreter::ValueType;
 use std::collections::HashMap;
 
@@ -10,7 +11,7 @@ impl<'a> Environment<'a> {
     pub fn new() -> Self {
         Self {
             parent: None,
-            definitions: HashMap::new(),
+            definitions: scheme::base::base_library(),
         }
     }
 
