@@ -162,6 +162,7 @@ pub enum Procedure {
 pub enum ValueType {
     Number(Number),
     Procedure(Procedure),
+    Void,
 }
 
 impl fmt::Display for ValueType {
@@ -172,7 +173,8 @@ impl fmt::Display for ValueType {
                 Number::Real(n) => write!(f, "{:?}", n),
                 Number::Rational(a, b) => write!(f, "{}/{}", a, b),
             },
-            ValueType::Procedure(_) => write!(f, "Procedure"),
+            ValueType::Procedure(p) => write!(f, "Procedure {:?}", p),
+            ValueType::Void => write!(f, "Void"),
         }
     }
 }
