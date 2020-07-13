@@ -38,13 +38,12 @@ impl fmt::Display for Token {
     }
 }
 
-#[derive(Clone)]
-pub struct TokenGenerator<CharIter: Iterator<Item = char>> {
-    current: Option<char>,
-    text_iterator: Peekable<CharIter>,
+pub struct TokenGenerator<'a, CharIter: Iterator<Item = char>> {
+    pub current: Option<char>,
+    pub text_iterator: &'a mut Peekable<CharIter>,
 }
 
-impl<CharIter: Iterator<Item = char>> Iterator for TokenGenerator<CharIter> {
+impl<'a, CharIter: Iterator<Item = char>> Iterator for TokenGenerator<'a, CharIter> {
     type Item = Result<Token>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.try_next() {
@@ -85,33 +84,35 @@ fn is_identifier_initial(c: char) -> bool {
     }
 }
 
-impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
-    pub fn new(mut text_iterator: CharIter) -> TokenGenerator<CharIter> {
+impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
+    pub fn new(text_iterator: &'a mut Peekable<CharIter>) -> TokenGenerator<'a, CharIter> {
         Self {
-            current: text_iterator.next(),
-            text_iterator: text_iterator.peekable(),
+            current: None,
+            text_iterator: text_iterator,
         }
     }
 
     fn try_next(&mut self) -> Result<Option<Token>> {
-        match self.current {
+        match self.advance(1) {
             Some(c) => match c {
                 ' ' | '\t' | '\n' | '\r' => self.atmosphere(),
                 ';' => self.comment(),
-                '(' => self.generate(Token::LeftParen),
-                ')' => self.generate(Token::RightParen),
-                '#' => match self.nextchar() {
+                '(' => Ok(Some(Token::LeftParen)),
+                ')' => Ok(Some(Token::RightParen)),
+                '#' => match self.advance(1) {
                     Some(cn) => match cn {
-                        '(' => self.generate(Token::VecConsIntro),
-                        't' => self.generate(Token::Boolean(true)),
-                        'f' => self.generate(Token::Boolean(false)),
-                        '\\' => match self.nextchar() {
-                            Some(cnn) => self.generate(Token::Character(cnn)),
+                        '(' => Ok(Some(Token::VecConsIntro)),
+                        't' => Ok(Some(Token::Boolean(true))),
+                        'f' => Ok(Some(Token::Boolean(false))),
+                        '\\' => match self.advance(1).take() {
+                            Some(cnn) => Ok(Some(Token::Character(cnn))),
                             None => invalid_token!("expect character after #\\"),
                         },
                         'u' => {
-                            if Some('8') == self.nextchar() && Some('(') == self.nextchar() {
-                                return self.generate(Token::ByteVecConsIntro);
+                            if Some('8') == self.advance(1).take()
+                                && Some('(') == self.advance(1).take()
+                            {
+                                return Ok(Some(Token::ByteVecConsIntro));
                             } else {
                                 invalid_token!("Imcomplete bytevector constant introducer");
                             }
@@ -120,15 +121,15 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
                     },
                     None => invalid_token!("expect '(' 't' or 'f' after #"),
                 },
-                '\'' => self.generate(Token::Quote),
-                '`' => self.generate(Token::Quasiquote),
+                '\'' => Ok(Some(Token::Quote)),
+                '`' => Ok(Some(Token::Quasiquote)),
                 ',' => match self.text_iterator.peek() {
                     Some(nc) => match nc {
                         '@' => {
-                            self.nextchar();
-                            self.generate(Token::UnquoteSplicing)
+                            self.advance(1).take();
+                            Ok(Some(Token::UnquoteSplicing))
                         }
-                        _ => self.generate(Token::Unquote),
+                        _ => Ok(Some(Token::Unquote)),
                     },
                     None => Ok(None),
                 },
@@ -147,29 +148,32 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
         }
     }
 
-    fn nextchar(&mut self) -> Option<char> {
+    fn advance(&mut self, count: usize) -> &mut Option<char> {
+        for _ in 1..count {
+            self.text_iterator.next();
+        }
         self.current = self.text_iterator.next();
-        self.current
+        &mut self.current
     }
 
     fn atmosphere(&mut self) -> Result<Option<Token>> {
-        while let Some(c) = self.current {
+        while let Some(c) = self.text_iterator.peek() {
             match c {
-                ' ' | '\t' | '\n' | '\r' => (),
+                ' ' | '\t' | '\n' | '\r' => {
+                    self.advance(1);
+                }
                 _ => break,
             }
-            self.nextchar();
         }
         self.try_next()
     }
 
     fn comment(&mut self) -> Result<Option<Token>> {
-        while let Some(c) = self.current {
+        while let Some(c) = self.advance(1) {
             match c {
                 '\n' | '\r' => break,
                 _ => (),
             }
-            self.nextchar();
         }
         self.try_next()
     }
@@ -180,15 +184,16 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
                 let mut identifier_str = String::new();
                 identifier_str.push(c);
                 loop {
-                    if let Some(nc) = self.nextchar() {
+                    if let Some(nc) = self.text_iterator.peek() {
                         match nc {
-                            _ if is_identifier_initial(nc) => identifier_str.push(nc),
-                            '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
+                            _ if is_identifier_initial(*nc) => identifier_str.push(*nc),
+                            '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(*nc),
                             _ => {
-                                test_delimiter(nc)?;
+                                test_delimiter(*nc)?;
                                 break;
                             }
                         }
+                        self.advance(1);
                     } else {
                         break;
                     }
@@ -200,30 +205,27 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
     }
 
     fn dot_subsequent(&mut self, identifier_str: &mut String) -> Result<()> {
-        if let Some(c) = self.nextchar() {
+        if let Some(c) = self.text_iterator.peek() {
             let valid = match c {
                 '+' | '-' | '.' | '@' => true,
-                _ => is_identifier_initial(c),
+                _ => is_identifier_initial(*c),
             };
             match valid {
-                true => {
-                    identifier_str.push(c);
-                    loop {
-                        match self.nextchar() {
-                            Some(nc) => match nc {
-                                _ if is_identifier_initial(nc) => identifier_str.push(nc),
-                                '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
-                                _ => {
-                                    test_delimiter(nc)?;
-                                    break;
-                                }
-                            },
-                            None => invalid_token!("Invalid Indentifer {}", identifier_str),
-                        }
+                true => loop {
+                    match self.advance(1).take() {
+                        Some(nc) => match nc {
+                            _ if is_identifier_initial(nc) => identifier_str.push(nc),
+                            '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
+                            _ => {
+                                test_delimiter(nc)?;
+                                break;
+                            }
+                        },
+                        None => invalid_token!("Invalid Indentifer {}", identifier_str),
                     }
-                }
+                },
                 false => {
-                    test_delimiter(c)?;
+                    test_delimiter(*c)?;
                 }
             }
         }
@@ -240,14 +242,14 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
                         let nc = self.text_iterator.peek();
                         match nc {
                             Some('.') => {
-                                self.nextchar();
+                                self.advance(1);
                                 identifier_str.push('.');
                                 self.dot_subsequent(&mut identifier_str)?;
                             }
                             // a dot subsequent without a dot is a sign subsequent
                             Some(_) => self.dot_subsequent(&mut identifier_str)?,
                             None => {
-                                self.nextchar();
+                                self.advance(1);
                             }
                         }
                     }
@@ -269,7 +271,7 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
             self.current = self.text_iterator.next();
             match self.current {
                 None => invalid_token!("Incomplete identifier {}", identifier_str),
-                Some('|') => break self.generate(Token::Identifier(identifier_str)),
+                Some('|') => break Ok(Some(Token::Identifier(identifier_str))),
                 Some(nc) => identifier_str.push(nc),
             }
         }
@@ -280,11 +282,11 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
             Some(_c) => {
                 let mut string_literal = String::new();
                 loop {
-                    if let Some(c) = self.nextchar() {
+                    if let Some(c) = self.advance(1).take() {
                         match c {
-                            '"' => break self.generate(Token::String(string_literal)),
+                            '"' => break Ok(Some(Token::String(string_literal))),
                             '\\' => {
-                                match self.nextchar() {
+                                match self.advance(1) {
                                     Some(ec) => {
                                         match ec {
                                             'a' => string_literal.push('\u{007}'),
@@ -315,38 +317,27 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
     }
 
     fn digital10(&mut self, number_literal: &mut String) -> Result<()> {
-        match self.nextchar() {
-            Some(nc) => match nc {
-                '0'..='9' => {
-                    number_literal.push(nc);
-                    loop {
-                        match self.nextchar() {
-                            Some(nc) => match nc {
-                                '0'..='9' => number_literal.push(nc),
-                                _ => {
-                                    test_delimiter(nc)?;
-                                    break Ok(());
-                                }
-                            },
-                            None => break Ok(()),
-                        }
+        loop {
+            match self.text_iterator.peek() {
+                Some(nc) => match nc {
+                    '0'..='9' => number_literal.push(*nc),
+                    _ => {
+                        break Ok(());
                     }
-                }
-                _ => {
-                    test_delimiter(nc)?;
-                    Ok(())
-                }
-            },
-            None => Ok(()),
+                },
+                None => break Ok(()),
+            }
+            self.advance(1);
         }
     }
 
     fn number_suffix(&mut self, number_literal: &mut String) -> Result<()> {
+        self.advance(1);
         number_literal.push('e');
         if let Some(sign) = self.text_iterator.peek() {
             if (*sign == '+') || (*sign == '-') {
                 number_literal.push(*sign);
-                self.nextchar();
+                self.advance(1);
             }
         }
         self.digital10(number_literal)
@@ -354,27 +345,20 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
 
     fn real(&mut self, number_literal: &mut String) -> Result<()> {
         number_literal.push('.');
-        match self.nextchar() {
+        self.advance(1);
+        match self.text_iterator.peek() {
             Some(nc) => match nc {
                 'e' => self.number_suffix(number_literal),
                 '0'..='9' => {
-                    number_literal.push(nc);
-                    loop {
-                        match self.nextchar() {
-                            Some(nc) => match nc {
-                                '0'..='9' => number_literal.push(nc),
-                                'e' => break self.number_suffix(number_literal),
-                                _ => {
-                                    test_delimiter(nc)?;
-                                    break Ok(());
-                                }
-                            },
-                            None => break Ok(()),
-                        }
+                    self.digital10(number_literal)?;
+                    match self.text_iterator.peek() {
+                        Some('e') => self.number_suffix(number_literal),
+                        Some(nnc) => test_delimiter(*nnc),
+                        None => Ok(()),
                     }
                 }
                 _ => {
-                    test_delimiter(nc)?;
+                    test_delimiter(*nc)?;
                     Ok(())
                 }
             },
@@ -383,16 +367,15 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
     }
 
     fn number(&mut self) -> Result<Option<Token>> {
-        match self.current {
+        match self.current.take() {
             Some(c) => {
                 let mut number_literal = String::new();
                 number_literal.push(c);
                 loop {
-                    match self.nextchar() {
+                    let peek = self.text_iterator.peek();
+                    match peek {
                         Some(nc) => match nc {
-                            '0'..='9' => {
-                                number_literal.push(nc);
-                            }
+                            '0'..='9' => self.digital10(&mut number_literal)?,
                             'e' => {
                                 self.number_suffix(&mut number_literal)?;
                                 break Ok(Some(Token::Real(number_literal)));
@@ -403,6 +386,7 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
                             }
                             '/' => {
                                 let mut denominator = String::new();
+                                self.advance(1);
                                 self.digital10(&mut denominator)?;
                                 break Ok(Some(Token::Rational(
                                     number_literal.parse::<i64>().unwrap(),
@@ -410,7 +394,7 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
                                 )));
                             }
                             _ => {
-                                test_delimiter(nc)?;
+                                test_delimiter(*nc)?;
                                 break Ok(Some(Token::Integer(
                                     number_literal.parse::<i64>().unwrap(),
                                 )));
@@ -425,25 +409,18 @@ impl<CharIter: Iterator<Item = char>> TokenGenerator<CharIter> {
             None => Ok(None),
         }
     }
-
-    fn generate(&mut self, token: Token) -> Result<Option<Token>> {
-        self.nextchar();
-        Ok(Some(token))
-    }
 }
 
-#[test]
-fn empty_text() {
-    let c = TokenGenerator::new("".chars());
-    assert_eq!(c.current, None);
+fn tokenize(text: &str) -> Result<Vec<Token>> {
+    let mut iter = text.chars().peekable();
+    let c = TokenGenerator::new(&mut iter);
+    c.collect()
 }
 
 #[test]
 fn simple_tokens() -> Result<()> {
-    let l = TokenGenerator::new("#t#f()#()#u8()'`,,@.".chars());
-    let result: Result<Vec<_>> = l.collect();
     assert_eq!(
-        result?,
+        tokenize("#t#f()#()#u8()'`,,@.")?,
         vec![
             Token::Boolean(true),
             Token::Boolean(false),
@@ -465,19 +442,16 @@ fn simple_tokens() -> Result<()> {
 
 #[test]
 fn identifier() -> Result<()> {
-    let l = TokenGenerator::new(
-        "
-    ... +
-    +soup+ <=?
-    ->string a34kTMNs
-    lambda list->vector
-    q V17a
-    |two words| |two; words|"
-            .chars(),
-    );
-    let result: Result<Vec<_>> = l.collect();
     assert_eq!(
-        result?,
+        tokenize(
+            "
+        ... +
+        +soup+ <=?
+        ->string a34kTMNs
+        lambda list->vector
+        q V17a
+        |two words| |two; words|"
+        )?,
         vec![
             Token::Identifier(String::from("...")),
             Token::Identifier(String::from("+")),
@@ -499,10 +473,8 @@ fn identifier() -> Result<()> {
 
 #[test]
 fn character() -> Result<()> {
-    let l = TokenGenerator::new("#\\a#\\ #\\\t".chars());
-    let result: Result<Vec<_>> = l.collect();
     assert_eq!(
-        result?,
+        tokenize("#\\a#\\ #\\\t")?,
         vec![
             Token::Character('a'),
             Token::Character(' '),
@@ -514,10 +486,8 @@ fn character() -> Result<()> {
 
 #[test]
 fn string() -> Result<()> {
-    let l = TokenGenerator::new("\"()+-123\"\"\\\"\"\"\\a\\b\\t\\r\\n\\\\\\|\"".chars());
-    let result: Result<Vec<_>> = l.collect();
     assert_eq!(
-        result?,
+        tokenize("\"()+-123\"\"\\\"\"\"\\a\\b\\t\\r\\n\\\\\\|\"")?,
         vec![
             Token::String(String::from("()+-123")),
             Token::String(String::from("\"")),
@@ -529,17 +499,14 @@ fn string() -> Result<()> {
 
 #[test]
 fn number() -> Result<()> {
-    let l = TokenGenerator::new(
-        "+123 123 -123
-                        1.23 -12.34 1. 0. +.0 -.1
-                        1e10 1.3e20 -43.e-12 +.12e+12
-                        1/2 +1/2 -32/3
-        "
-        .chars(),
-    );
-    let result: Result<Vec<_>> = l.collect();
     assert_eq!(
-        result?,
+        tokenize(
+            "+123 123 -123
+                    1.23 -12.34 1. 0. +.0 -.1
+                    1e10 1.3e20 -43.e-12 +.12e+12
+                    1/2 +1/2 -32/3
+            "
+        )?,
         vec![
             Token::Integer(123),
             Token::Integer(123),
@@ -565,10 +532,8 @@ fn number() -> Result<()> {
 #[test]
 
 fn atmosphere() -> Result<()> {
-    let l = TokenGenerator::new("\t(- \n4\r(+ 1 2))".chars());
-    let result: Result<Vec<_>> = l.collect();
     assert_eq!(
-        result?,
+        tokenize("\t(- \n4\r(+ 1 2))")?,
         vec![
             Token::LeftParen,
             Token::Identifier(String::from("-")),
@@ -586,10 +551,8 @@ fn atmosphere() -> Result<()> {
 
 #[test]
 fn comment() -> Result<()> {
-    let l = TokenGenerator::new("abcd;+-12\t\n\r 12".chars());
-    let result: Result<Vec<_>> = l.collect();
     assert_eq!(
-        result?,
+        tokenize("abcd;+-12\t\n\r 12")?,
         vec![Token::Identifier(String::from("abcd")), Token::Integer(12)]
     );
     Ok(())
