@@ -107,6 +107,26 @@ pub(crate) fn base_library() -> HashMap<String, ValueType> {
         }
     }
 
+    fn display(arguments: Vec<ValueType>) -> Result<ValueType> {
+        Ok(match arguments.len() {
+            1 => {
+                print!("{}", arguments.first().unwrap());
+                ValueType::Void
+            }
+            _ => logic_error!("display takes exactly one argument"),
+        })
+    }
+
+    fn newline(arguments: Vec<ValueType>) -> Result<ValueType> {
+        Ok(match arguments.len() {
+            0 => {
+                println!("");
+                ValueType::Void
+            }
+            _ => logic_error!("display takes exactly one argument"),
+        })
+    }
+
     [
         (
             "+".to_string(),
@@ -135,6 +155,14 @@ pub(crate) fn base_library() -> HashMap<String, ValueType> {
         (
             "sqrt".to_string(),
             ValueType::Procedure(Procedure::Buildin(sqrt)),
+        ),
+        (
+            "display".to_string(),
+            ValueType::Procedure(Procedure::Buildin(display)),
+        ),
+        (
+            "newline".to_string(),
+            ValueType::Procedure(Procedure::Buildin(newline)),
         ),
     ]
     .iter()

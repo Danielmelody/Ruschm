@@ -45,7 +45,10 @@ pub fn run() {
                     match it.eval(source.chars()) {
                         Ok(opt) => {
                             if let Some(value) = opt {
-                                println!("{}", value);
+                                match value {
+                                    interpreter::ValueType::Void => (),
+                                    _ => println!("{}", value),
+                                }
                             }
                         }
                         Err(e) => eprintln!("{}", e),
