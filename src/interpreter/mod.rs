@@ -6,6 +6,8 @@ use crate::parser::*;
 use std::cell::RefCell;
 use std::fmt;
 
+use std::iter::Iterator;
+
 type Result<T> = std::result::Result<T, Error>;
 
 macro_rules! logic_error {
@@ -293,8 +295,18 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn eval(&'a self, char_stream: impl Iterator<Item = char>) -> Result<Option<ValueType>> {
-        let ast: Result<ParseResult> = TokenGenerator::new(char_stream).collect();
-        self.eval_root_ast(&ast??)
+        {
+            let mut char_visitor = char_stream.peekable();
+            let mut last_value = None;
+            loop {
+                let token_stream = TokenGenerator::new(&mut char_visitor);
+                let result: Result<ParseResult> = token_stream.collect();
+                match result?? {
+                    Some(ast) => last_value = self.eval_root_ast(&ast)?,
+                    None => break Ok(last_value),
+                }
+            }
+        }
     }
 }
 
