@@ -194,21 +194,27 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                 Some(Statement::Expression(test)),
                 Some(Statement::Expression(consequent)),
                 Some(Token::RightParen),
-            ) => Ok(Expression::Conditional(
-                Box::new(test),
-                Box::new(consequent),
-                None,
-            )),
+            ) => {
+                self.advance(1);
+                Ok(Expression::Conditional(
+                    Box::new(test),
+                    Box::new(consequent),
+                    None,
+                ))
+            }
             (
                 Some(Statement::Expression(test)),
                 Some(Statement::Expression(consequent)),
                 Some(_),
             ) => match self.parse()? {
-                Some(Statement::Expression(alternative)) => Ok(Expression::Conditional(
-                    Box::new(test),
-                    Box::new(consequent),
-                    Some(Box::new(alternative)),
-                )),
+                Some(Statement::Expression(alternative)) => {
+                    self.advance(1);
+                    Ok(Expression::Conditional(
+                        Box::new(test),
+                        Box::new(consequent),
+                        Some(Box::new(alternative)),
+                    ))
+                }
                 other => syntax_error!("expect condition alternatives, got {:?}", other),
             },
             _ => syntax_error!("conditional syntax error"),
@@ -544,15 +550,15 @@ fn conditional() -> Result<()> {
         Token::RightParen,
     ];
     let mut parser = Parser::new(tokens.into_iter());
-    let ast = parser.parse()?;
     assert_eq!(
-        ast,
+        parser.parse()?,
         Some(Statement::Expression(Expression::Conditional(
             Box::new(Expression::Boolean(true)),
             Box::new(Expression::Integer(1)),
             Some(Box::new(Expression::Integer(2)))
         )))
     );
+    assert_eq!(parser.parse()?, None);
     Ok(())
 }
 
