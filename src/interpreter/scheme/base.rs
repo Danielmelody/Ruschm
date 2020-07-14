@@ -53,45 +53,76 @@ pub(crate) fn base_library() -> HashMap<String, ValueType> {
         })
     }
 
-    fn max(arguments: Vec<ValueType>) -> Result<ValueType> {
-        match arguments.len() {
-            0 => logic_error!("max requires at least one argument!"),
-            _ => {
-                let mut iter = arguments.iter();
-                match iter.next() {
-                    Some(ValueType::Number(num)) => {
-                        iter.try_fold(ValueType::Number(*num), |a, b| match (a, b) {
-                            (ValueType::Number(num1), ValueType::Number(num2)) => {
-                                Ok(ValueType::Number(upcast_oprands((num1, *num2)).get_max()))
+    fn equals(arguments: Vec<ValueType>) -> Result<ValueType> {
+        if arguments.is_empty() {
+            return Ok(ValueType::Boolean(true));
+        }
+        let first = &arguments[0];
+        Ok(ValueType::Boolean(
+            arguments.iter().all(|item| item == first),
+        ))
+    }
+
+    macro_rules! comparision {
+        ($name:tt, $operator:tt) => {
+            fn $name(arguments: Vec<ValueType>) -> Result<ValueType> {
+                match arguments.len() {
+                    0 | 1 => Ok(ValueType::Boolean(true)),
+                    _ => {
+                        let mut iter = arguments.iter();
+                        let mut last = iter.next().unwrap();
+                        for current in iter {
+                            match (last, current) {
+                                (ValueType::Number(a), ValueType::Number(b)) => {
+                                    if !(a $operator b) {
+                                        return Ok(ValueType::Boolean(false));
+                                    }
+                                    last = current;
+                                }
+                                _ => logic_error!("great comparision can only between numbers!"),
+                            }
+                        }
+                        Ok(ValueType::Boolean(true))
+                    }
+                }
+            }
+        };
+    }
+
+    comparision!(greater, >);
+    comparision!(greater_equal, >=);
+    comparision!(less, <);
+    comparision!(less_equal, <=);
+
+    macro_rules! first_of_order {
+        ($name:tt, $cmp:tt) => {
+            fn $name(arguments: Vec<ValueType>) -> Result<ValueType> {
+                match arguments.len() {
+                    0 => logic_error!("min requires at least one argument!"),
+                    _ => {
+                        let mut iter = arguments.iter();
+                        match iter.next() {
+                            Some(ValueType::Number(num)) => {
+                                iter.try_fold(ValueType::Number(*num), |a, b| match (a, b) {
+                                    (ValueType::Number(num1), ValueType::Number(num2)) => {
+                                        Ok(ValueType::Number(match num1 $cmp *num2 {
+                                            true => upcast_oprands((num1, *num2)).lhs(),
+                                            false => upcast_oprands((num1, *num2)).rhs(),
+                                        }))
+                                    }
+                                    _ => logic_error!("expect a number!"),
+                                })
                             }
                             _ => logic_error!("expect a number!"),
-                        })
+                        }
                     }
-                    _ => logic_error!("expect a number!"),
                 }
             }
         }
     }
 
-    fn min(arguments: Vec<ValueType>) -> Result<ValueType> {
-        match arguments.len() {
-            0 => logic_error!("min requires at least one argument!"),
-            _ => {
-                let mut iter = arguments.iter();
-                match iter.next() {
-                    Some(ValueType::Number(num)) => {
-                        iter.try_fold(ValueType::Number(*num), |a, b| match (a, b) {
-                            (ValueType::Number(num1), ValueType::Number(num2)) => {
-                                Ok(ValueType::Number(upcast_oprands((num1, *num2)).get_min()))
-                            }
-                            _ => logic_error!("expect a number!"),
-                        })
-                    }
-                    _ => logic_error!("expect a number!"),
-                }
-            }
-        }
-    }
+    first_of_order!(max, >);
+    first_of_order!(min, <);
 
     fn sqrt(arguments: Vec<ValueType>) -> Result<ValueType> {
         match arguments.len() {
@@ -127,43 +158,30 @@ pub(crate) fn base_library() -> HashMap<String, ValueType> {
         })
     }
 
+    macro_rules! function_mapping {
+        ($ident:tt, $function:tt) => {
+            (
+                $ident.to_string(),
+                ValueType::Procedure(Procedure::Buildin($function)),
+            )
+        };
+    }
+
     [
-        (
-            "+".to_string(),
-            ValueType::Procedure(Procedure::Buildin(add)),
-        ),
-        (
-            "-".to_string(),
-            ValueType::Procedure(Procedure::Buildin(sub)),
-        ),
-        (
-            "*".to_string(),
-            ValueType::Procedure(Procedure::Buildin(mul)),
-        ),
-        (
-            "/".to_string(),
-            ValueType::Procedure(Procedure::Buildin(div)),
-        ),
-        (
-            "max".to_string(),
-            ValueType::Procedure(Procedure::Buildin(max)),
-        ),
-        (
-            "min".to_string(),
-            ValueType::Procedure(Procedure::Buildin(min)),
-        ),
-        (
-            "sqrt".to_string(),
-            ValueType::Procedure(Procedure::Buildin(sqrt)),
-        ),
-        (
-            "display".to_string(),
-            ValueType::Procedure(Procedure::Buildin(display)),
-        ),
-        (
-            "newline".to_string(),
-            ValueType::Procedure(Procedure::Buildin(newline)),
-        ),
+        function_mapping!("+", add),
+        function_mapping!("-", sub),
+        function_mapping!("*", mul),
+        function_mapping!("/", div),
+        function_mapping!("=", equals),
+        function_mapping!("<", less),
+        function_mapping!("<=", less_equal),
+        function_mapping!(">", greater),
+        function_mapping!(">=", greater_equal),
+        function_mapping!("min", min),
+        function_mapping!("max", max),
+        function_mapping!("sqrt", sqrt),
+        function_mapping!("display", display),
+        function_mapping!("newline", newline),
     ]
     .iter()
     .cloned()
