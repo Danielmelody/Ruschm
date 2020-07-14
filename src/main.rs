@@ -1,3 +1,4 @@
+mod environment;
 mod error;
 mod interpreter;
 mod lexer;
