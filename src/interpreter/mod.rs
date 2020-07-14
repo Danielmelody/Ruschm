@@ -1,6 +1,6 @@
 #![allow(dead_code)]
+use crate::environment::Environment;
 use crate::error::*;
-use crate::interpreter::env::Environment;
 use crate::lexer::*;
 use crate::parser::*;
 use std::cell::RefCell;
@@ -16,8 +16,7 @@ macro_rules! logic_error {
     )
 }
 
-mod env;
-mod scheme;
+pub mod scheme;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Number {
