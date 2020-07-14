@@ -144,10 +144,36 @@ impl std::ops::Div<Number> for Number {
     }
 }
 
+// pub struct ArgumentIter<'a> {
+//     args: Box<impl Iterator<Item = Result<ValueType>> + 'a>,
+// }
+
+pub struct BuildinFunction(
+    fn(Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType>,
+);
+
+impl fmt::Debug for BuildinFunction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NotWorkingFunctionPointer(0x{:x})", self.0 as usize)
+    }
+}
+
+impl Clone for BuildinFunction {
+    fn clone(&self) -> Self {
+        BuildinFunction(self.0.clone())
+    }
+}
+
+impl PartialEq for BuildinFunction {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 as usize == rhs.0 as usize
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Procedure {
     User(Vec<String>, Expression),
-    Buildin(fn(arguments: Vec<ValueType>) -> Result<ValueType>),
+    Buildin(BuildinFunction),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -207,12 +233,12 @@ impl<'a> Interpreter<'a> {
         &'a self,
         formals: &Vec<String>,
         body: &Expression,
-        args: impl Iterator<Item = ValueType>,
+        args: impl Iterator<Item = Result<ValueType>>,
         parent_env: &'b Environment<'b>,
     ) -> Result<ValueType> {
         let child_env = RefCell::new(Environment::child(parent_env));
         for (param, arg) in formals.iter().zip(args) {
-            child_env.borrow_mut().define(param.clone(), arg.clone());
+            child_env.borrow_mut().define(param.clone(), arg?);
         }
         self.eval_expression(&body, &child_env)
     }
@@ -229,22 +255,19 @@ impl<'a> Interpreter<'a> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
                 let procedure = self.eval_expression(procedure_expr, env)?;
-                let mut evaluated_args = vec![];
-                for arg in arguments {
-                    evaluated_args.push(self.eval_expression(arg, env)?);
-                }
+                let evaluated_args = Box::new(
+                    arguments
+                        .into_iter()
+                        .map(|arg| self.eval_expression(arg, env)),
+                );
                 let parent_env = &env.borrow();
                 match procedure {
-                    ValueType::Procedure(Procedure::Buildin(buildin_procedral)) => {
-                        buildin_procedral(evaluated_args)?
+                    ValueType::Procedure(Procedure::Buildin(BuildinFunction(fp))) => {
+                        fp(evaluated_args)?
                     }
-                    ValueType::Procedure(Procedure::User(formals, body)) => self
-                        .eval_scheme_procedure(
-                            &formals,
-                            &body,
-                            evaluated_args.into_iter(),
-                            parent_env,
-                        )?,
+                    ValueType::Procedure(Procedure::User(formals, body)) => {
+                        self.eval_scheme_procedure(&formals, &body, evaluated_args, parent_env)?
+                    }
                     _ => logic_error!("expect a procedure here"),
                 }
             }
