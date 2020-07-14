@@ -4,6 +4,7 @@ use crate::error::*;
 use crate::lexer::*;
 use crate::parser::*;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::fmt;
 
 use std::iter::Iterator;
@@ -25,46 +26,20 @@ pub enum Number {
     Rational(i64, i64),
 }
 
+impl PartialOrd for Number {
+    fn partial_cmp(&self, other: &Number) -> Option<Ordering> {
+        match upcast_oprands((*self, *other)) {
+            NumberBinaryOperand::Integer(a, b) => a.partial_cmp(&b),
+            NumberBinaryOperand::Rational(a1, a2, b1, b2) => (a1 * b2).partial_cmp(&(b1 * a2)),
+            NumberBinaryOperand::Real(a, b) => a.partial_cmp(&b),
+        }
+    }
+}
+
 enum NumberBinaryOperand {
     Integer(i64, i64),
     Real(f64, f64),
     Rational(i64, i64, i64, i64),
-}
-
-impl NumberBinaryOperand {
-    pub fn get_max(&self) -> Number {
-        match self {
-            NumberBinaryOperand::Integer(a, b) => match a < b {
-                false => Number::Integer(*a),
-                true => Number::Integer(*b),
-            },
-            NumberBinaryOperand::Real(a, b) => match a < b {
-                false => Number::Real(*a),
-                true => Number::Real(*b),
-            },
-            NumberBinaryOperand::Rational(a1, a2, b1, b2) => match a1 * b2 < b1 * a2 {
-                false => Number::Rational(*a1, *a2),
-                true => Number::Rational(*b1, *b2),
-            },
-        }
-    }
-
-    pub fn get_min(&self) -> Number {
-        match self {
-            NumberBinaryOperand::Integer(a, b) => match a < b {
-                true => Number::Integer(*a),
-                false => Number::Integer(*b),
-            },
-            NumberBinaryOperand::Real(a, b) => match a < b {
-                true => Number::Real(*a),
-                false => Number::Real(*b),
-            },
-            NumberBinaryOperand::Rational(a1, a2, b1, b2) => match a1 * b2 < b1 * a2 {
-                true => Number::Rational(*a1, *a2),
-                false => Number::Rational(*b1, *b2),
-            },
-        }
-    }
 }
 
 // Integer => Rational => Real
@@ -88,6 +63,24 @@ fn upcast_oprands(operand: (Number, Number)) -> NumberBinaryOperand {
         (Number::Real(a), Number::Real(b)) => (NumberBinaryOperand::Real(a, b)),
         (Number::Rational(a1, a2), Number::Rational(b1, b2)) => {
             NumberBinaryOperand::Rational(a1, a2, b1, b2)
+        }
+    }
+}
+
+impl NumberBinaryOperand {
+    pub fn lhs(&self) -> Number {
+        match self {
+            NumberBinaryOperand::Integer(a, _) => Number::Integer(*a),
+            NumberBinaryOperand::Real(a, _) => Number::Real(*a),
+            NumberBinaryOperand::Rational(a1, a2, _, _) => Number::Rational(*a1, *a2),
+        }
+    }
+
+    pub fn rhs(&self) -> Number {
+        match self {
+            NumberBinaryOperand::Integer(_, b) => Number::Integer(*b),
+            NumberBinaryOperand::Real(_, b) => Number::Real(*b),
+            NumberBinaryOperand::Rational(_, _, b1, b2) => Number::Rational(*b1, *b2),
         }
     }
 }
@@ -449,6 +442,23 @@ fn arithmetic() -> Result<()> {
     ))? {
         ValueType::Number(Number::Real(should_be_nan)) => assert!(should_be_nan.is_nan()),
         _ => panic!("sqrt result should be a number"),
+    }
+
+    for (cmp, result) in [">", "<", ">=", "<="]
+        .iter()
+        .zip([false, false, true, true].iter())
+    {
+        assert_eq!(
+            interpreter.eval_root_expression(Expression::ProcedureCall(
+                Box::new(Expression::Identifier(cmp.to_string())),
+                vec![
+                    Box::new(Expression::Integer(1)),
+                    Box::new(Expression::Integer(1)),
+                    Box::new(Expression::Integer(1)),
+                ],
+            ))?,
+            ValueType::Boolean(*result)
+        )
     }
 
     Ok(())
