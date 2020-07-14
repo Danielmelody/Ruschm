@@ -51,8 +51,8 @@ pub enum Expression {
     Real(String),
     Rational(i64, u64),
     Procedure(Vec<String>, Box<Expression>),
-    ProcedureCall(Box<Expression>, Vec<Box<Expression>>),
-    Conditional(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
+    ProcedureCall(Box<Expression>, Vec<Expression>),
+    Conditional(Box<(Expression, Expression, Option<Expression>)>),
 }
 
 pub struct Parser<TokenIter: Iterator<Item = Token>> {
@@ -196,11 +196,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                 Some(Token::RightParen),
             ) => {
                 self.advance(1);
-                Ok(Expression::Conditional(
-                    Box::new(test),
-                    Box::new(consequent),
-                    None,
-                ))
+                Ok(Expression::Conditional(Box::new((test, consequent, None))))
             }
             (
                 Some(Statement::Expression(test)),
@@ -209,11 +205,11 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
             ) => match self.parse()? {
                 Some(Statement::Expression(alternative)) => {
                     self.advance(1);
-                    Ok(Expression::Conditional(
-                        Box::new(test),
-                        Box::new(consequent),
-                        Some(Box::new(alternative)),
-                    ))
+                    Ok(Expression::Conditional(Box::new((
+                        test,
+                        consequent,
+                        Some(alternative),
+                    ))))
                 }
                 other => syntax_error!("expect condition alternatives, got {:?}", other),
             },
@@ -294,7 +290,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     fn procedure_call(&mut self) -> Result<Expression> {
         match self.parse()? {
             Some(Statement::Expression(operator)) => {
-                let mut arguments: Vec<Box<Expression>> = vec![];
+                let mut arguments: Vec<Expression> = vec![];
                 loop {
                     match self.lexer.peek() {
                         Some(Token::RightParen) => {
@@ -303,7 +299,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                         }
                         None => syntax_error!("Unmatched Parentheses!"),
                         _ => arguments.push(match self.parse()? {
-                            Some(Statement::Expression(subexpr)) => Box::new(subexpr),
+                            Some(Statement::Expression(subexpr)) => subexpr,
                             _ => syntax_error!("Unmatched Parentheses!"),
                         }),
                     }
@@ -386,9 +382,9 @@ fn procedure_call() -> Result<()> {
         expr_to_statement!(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
-                Box::new(Expression::Integer(1)),
-                Box::new(Expression::Integer(2)),
-                Box::new(Expression::Integer(3)),
+                Expression::Integer(1),
+                Expression::Integer(2),
+                Expression::Integer(3),
             ]
         ))
     );
@@ -459,8 +455,8 @@ fn definition() -> Result<()> {
                         Box::new(Expression::ProcedureCall(
                             Box::new(Expression::Identifier("+".to_string())),
                             vec![
-                                Box::new(Expression::Identifier("x".to_string())),
-                                Box::new(Expression::Identifier("y".to_string())),
+                                Expression::Identifier("x".to_string()),
+                                Expression::Identifier("y".to_string()),
                             ]
                         ))
                     )
@@ -491,14 +487,11 @@ fn nested_procedure_call() -> Result<()> {
         expr_to_statement!(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
-                Box::new(Expression::Integer(1)),
-                Box::new(Expression::ProcedureCall(
+                Expression::Integer(1),
+                Expression::ProcedureCall(
                     Box::new(Expression::Identifier("-".to_string())),
-                    vec![
-                        Box::new(Expression::Integer(2)),
-                        Box::new(Expression::Integer(3))
-                    ]
-                )),
+                    vec![Expression::Integer(2), Expression::Integer(3)]
+                ),
             ]
         ))
     );
@@ -530,8 +523,8 @@ fn lambda() -> Result<()> {
             Box::new(Expression::ProcedureCall(
                 Box::new(Expression::Identifier("+".to_string())),
                 vec![
-                    Box::new(Expression::Identifier("x".to_string())),
-                    Box::new(Expression::Identifier("y".to_string()))
+                    Expression::Identifier("x".to_string()),
+                    Expression::Identifier("y".to_string())
                 ]
             ))
         )))
@@ -552,11 +545,11 @@ fn conditional() -> Result<()> {
     let mut parser = Parser::new(tokens.into_iter());
     assert_eq!(
         parser.parse()?,
-        Some(Statement::Expression(Expression::Conditional(
-            Box::new(Expression::Boolean(true)),
-            Box::new(Expression::Integer(1)),
-            Some(Box::new(Expression::Integer(2)))
-        )))
+        Some(Statement::Expression(Expression::Conditional(Box::new((
+            Expression::Boolean(true),
+            Expression::Integer(1),
+            Some(Expression::Integer(2))
+        )))))
     );
     assert_eq!(parser.parse()?, None);
     Ok(())
