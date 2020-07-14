@@ -47,10 +47,12 @@ pub enum ImportSet {
 pub enum Expression {
     Identifier(String),
     Integer(i64),
+    Boolean(bool),
     Real(String),
     Rational(i64, u64),
     Procedure(Vec<String>, Box<Expression>),
     ProcedureCall(Box<Expression>, Vec<Box<Expression>>),
+    Conditional(Box<Expression>, Box<Expression>, Option<Box<Expression>>),
 }
 
 pub struct Parser<TokenIter: Iterator<Item = Token>> {
@@ -87,6 +89,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     pub fn parse(&mut self) -> Result<Option<Statement>> {
         match self.advance(1).take() {
             Some(token) => match token {
+                Token::Boolean(b) => Ok(Some(Statement::Expression(Expression::Boolean(b)))),
                 Token::Integer(a) => Ok(expr_to_statement!(Expression::Integer(a))),
                 Token::Real(a) => Ok(expr_to_statement!(Expression::Real(a))),
                 Token::Rational(a, b) => Ok(expr_to_statement!(Expression::Rational(a, b))),
@@ -96,6 +99,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                         "lambda" => Ok(expr_to_statement!(self.lambda()?)),
                         "define" => Ok(def_to_statement!(self.definition()?)),
                         "import" => Ok(Some(self.import_declaration()?)),
+                        "if" => Ok(expr_to_statement!(self.condition()?)),
                         _ => Ok(expr_to_statement!(self.procedure_call()?)),
                     },
                     Some(Token::RightParen) => syntax_error!("empty procedure call"),
@@ -181,6 +185,34 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
         Ok(Statement::ImportDeclaration(
             self.collect(Self::import_set)?,
         ))
+    }
+
+    fn condition(&mut self) -> Result<Expression> {
+        self.advance(1);
+        match (self.parse()?, self.parse()?, self.lexer.peek()) {
+            (
+                Some(Statement::Expression(test)),
+                Some(Statement::Expression(consequent)),
+                Some(Token::RightParen),
+            ) => Ok(Expression::Conditional(
+                Box::new(test),
+                Box::new(consequent),
+                None,
+            )),
+            (
+                Some(Statement::Expression(test)),
+                Some(Statement::Expression(consequent)),
+                Some(_),
+            ) => match self.parse()? {
+                Some(Statement::Expression(alternative)) => Ok(Expression::Conditional(
+                    Box::new(test),
+                    Box::new(consequent),
+                    Some(Box::new(alternative)),
+                )),
+                other => syntax_error!("expect condition alternatives, got {:?}", other),
+            },
+            _ => syntax_error!("conditional syntax error"),
+        }
     }
 
     fn import_set(&mut self) -> Result<ImportSet> {
@@ -496,6 +528,29 @@ fn lambda() -> Result<()> {
                     Box::new(Expression::Identifier("y".to_string()))
                 ]
             ))
+        )))
+    );
+    Ok(())
+}
+
+#[test]
+fn conditional() -> Result<()> {
+    let tokens = vec![
+        Token::LeftParen,
+        Token::Identifier("if".to_string()),
+        Token::Boolean(true),
+        Token::Integer(1),
+        Token::Integer(2),
+        Token::RightParen,
+    ];
+    let mut parser = Parser::new(tokens.into_iter());
+    let ast = parser.parse()?;
+    assert_eq!(
+        ast,
+        Some(Statement::Expression(Expression::Conditional(
+            Box::new(Expression::Boolean(true)),
+            Box::new(Expression::Integer(1)),
+            Some(Box::new(Expression::Integer(2)))
         )))
     );
     Ok(())

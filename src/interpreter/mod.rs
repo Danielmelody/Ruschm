@@ -160,6 +160,7 @@ pub enum Procedure {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
     Number(Number),
+    Boolean(bool),
     Procedure(Procedure),
     Void,
 }
@@ -174,6 +175,8 @@ impl fmt::Display for ValueType {
             },
             ValueType::Procedure(p) => write!(f, "Procedure {:?}", p),
             ValueType::Void => write!(f, "Void"),
+            ValueType::Boolean(true) => write!(f, "#t"),
+            ValueType::Boolean(false) => write!(f, "#f"),
         }
     }
 }
@@ -255,6 +258,17 @@ impl<'a> Interpreter<'a> {
             Expression::Procedure(formals, body) => {
                 ValueType::Procedure(Procedure::User(formals.clone(), *body.clone()))
             }
+            Expression::Conditional(test, consequent, alternative) => {
+                match self.eval_expression(test, env)? {
+                    ValueType::Boolean(true) => self.eval_expression(consequent, env)?,
+                    ValueType::Boolean(false) => match alternative {
+                        Some(alter) => self.eval_expression(alter, env)?,
+                        None => ValueType::Void,
+                    },
+                    _ => logic_error!("if condition should be a boolean expression"),
+                }
+            }
+            Expression::Boolean(value) => ValueType::Boolean(*value),
             Expression::Integer(value) => ValueType::Number(Number::Integer(*value)),
             Expression::Real(number_literal) => {
                 ValueType::Number(Number::Real(number_literal.parse::<f64>().unwrap()))
@@ -550,6 +564,21 @@ fn lambda_call() -> Result<()> {
     assert_eq!(
         interpreter.eval_program(program.iter())?,
         Some(ValueType::Number(Number::Integer(3)))
+    );
+    Ok(())
+}
+
+#[test]
+fn condition() -> Result<()> {
+    let interpreter = Interpreter::new();
+    let program = vec![Statement::Expression(Expression::Conditional(
+        Box::new(Expression::Boolean(true)),
+        Box::new(Expression::Integer(1)),
+        Some(Box::new(Expression::Integer(2))),
+    ))];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(ValueType::Number(Number::Integer(1)))
     );
     Ok(())
 }
