@@ -144,38 +144,49 @@ impl std::ops::Div<Number> for Number {
     }
 }
 
-pub struct BuildinFunction(
+#[derive(Clone)]
+pub struct BuildinProcedure(
+    &'static str,
     fn(Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType>,
 );
 
-impl fmt::Debug for BuildinFunction {
+impl fmt::Display for BuildinProcedure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BuildinFunction(0x{:x})", self.0 as usize)
+        write!(f, "<build-in procedure ({})>", self.0)
+    }
+}
+impl fmt::Debug for BuildinProcedure {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self)
     }
 }
 
-impl Clone for BuildinFunction {
-    fn clone(&self) -> Self {
-        BuildinFunction(self.0.clone())
-    }
-}
-
-impl PartialEq for BuildinFunction {
+impl PartialEq for BuildinProcedure {
     fn eq(&self, rhs: &Self) -> bool {
-        self.0 as usize == rhs.0 as usize
+        self.0 == rhs.0 && self.1 as usize == rhs.1 as usize
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Procedure {
-    User(Vec<String>, Vec<Definition>, Vec<Expression>),
-    Buildin(BuildinFunction),
+    User(SchemeProcedure),
+    Buildin(BuildinProcedure),
+}
+
+impl fmt::Display for Procedure {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Procedure::User(procedure) => write!(f, "{}", procedure),
+            Procedure::Buildin(fp) => write!(f, "{}", fp),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
     Number(Number),
     Boolean(bool),
+    Datum(Box<Statement>),
     Procedure(Procedure),
     Vector(Vec<ValueType>),
     Void,
@@ -189,7 +200,8 @@ impl fmt::Display for ValueType {
                 Number::Real(n) => write!(f, "{:?}", n),
                 Number::Rational(a, b) => write!(f, "{}/{}", a, b),
             },
-            ValueType::Procedure(p) => write!(f, "Procedure {:?}", p),
+            ValueType::Datum(expr) => write!(f, "{}", expr),
+            ValueType::Procedure(p) => write!(f, "{}", p),
             ValueType::Void => write!(f, "Void"),
             ValueType::Boolean(true) => write!(f, "#t"),
             ValueType::Boolean(false) => write!(f, "#f"),
@@ -279,24 +291,23 @@ impl<'a> Interpreter<'a> {
                 );
                 let parent_env = &env.borrow();
                 match procedure {
-                    ValueType::Procedure(Procedure::Buildin(BuildinFunction(fp))) => {
+                    ValueType::Procedure(Procedure::Buildin(BuildinProcedure(_, fp))) => {
                         fp(evaluated_args)?
                     }
-                    ValueType::Procedure(Procedure::User(formals, definitions, expressions)) => {
-                        self.eval_scheme_procedure(
-                            &formals,
-                            &definitions,
-                            &expressions,
-                            evaluated_args,
-                            parent_env,
-                        )?
-                    }
+                    ValueType::Procedure(Procedure::User(SchemeProcedure(
+                        formals,
+                        definitions,
+                        expressions,
+                    ))) => self.eval_scheme_procedure(
+                        &formals,
+                        &definitions,
+                        &expressions,
+                        evaluated_args,
+                        parent_env,
+                    )?,
                     _ => logic_error!("expect a procedure here"),
                 }
             }
-            Expression::Procedure(formals, definitions, expressions) => ValueType::Procedure(
-                Procedure::User(formals.clone(), definitions.clone(), expressions.clone()),
-            ),
             Expression::Vector(vector) => {
                 let mut values = Vec::with_capacity(vector.len());
                 for expr in vector {
@@ -304,6 +315,7 @@ impl<'a> Interpreter<'a> {
                 }
                 ValueType::Vector(values)
             }
+            Expression::Procedure(scheme) => ValueType::Procedure(Procedure::User(scheme.clone())),
             Expression::Conditional(cond) => {
                 let &(test, consequent, alternative) = &cond.as_ref();
                 match self.eval_expression(&test, env)? {
@@ -315,6 +327,7 @@ impl<'a> Interpreter<'a> {
                     _ => logic_error!("if condition should be a boolean expression"),
                 }
             }
+            Expression::Datum(datum) => ValueType::Datum(datum.clone()),
             Expression::Boolean(value) => ValueType::Boolean(*value),
             Expression::Integer(value) => ValueType::Number(Number::Integer(*value)),
             Expression::Real(number_literal) => {
