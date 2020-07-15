@@ -184,7 +184,7 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         ($ident:tt, $function:tt) => {
             (
                 $ident.to_string(),
-                ValueType::Procedure(Procedure::Buildin(BuildinFunction($function))),
+                ValueType::Procedure(Procedure::Buildin(BuildinProcedure($ident, $function))),
             )
         };
     }

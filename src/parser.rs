@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::error::*;
 use crate::lexer::Token;
+use std::fmt;
 use std::iter::{FromIterator, Iterator, Peekable};
 
 type Result<T> = std::result::Result<T, Error>;
@@ -24,6 +25,13 @@ macro_rules! def_to_statement {
     };
 }
 
+pub(crate) fn join_displayable(iter: impl IntoIterator<Item = impl fmt::Display>) -> String {
+    iter.into_iter()
+        .map(|d| format!("{}", d))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub enum Statement {
     ImportDeclaration(Vec<ImportSet>),
@@ -31,8 +39,32 @@ pub enum Statement {
     Expression(Expression),
 }
 
+impl fmt::Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Statement::ImportDeclaration(imports) => write!(
+                f,
+                "(import {})",
+                imports
+                    .iter()
+                    .map(|i| format!("{}", i))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Statement::Definition(def) => write!(f, "{}", def),
+            Statement::Expression(expr) => write!(f, "{}", expr),
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct Definition(pub String, pub Expression);
+
+impl fmt::Display for Definition {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "(define {} {})", self.0, self.1)
+    }
+}
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum ImportSet {
@@ -43,6 +75,27 @@ pub enum ImportSet {
     Rename(Box<ImportSet>, Vec<(String, String)>),
 }
 
+impl fmt::Display for ImportSet {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Direct(s) => write!(f, "{}", s),
+            Self::Only(lib, names) => write!(f, "(only {} {}", lib, names.join(" ")),
+            Self::Except(lib, names) => write!(f, "(except {} {}", lib, names.join(" ")),
+            Self::Prefix(lib, prefix) => write!(f, "(prefix {} {}", lib, prefix),
+            Self::Rename(lib, rename) => write!(
+                f,
+                "({} {})",
+                lib,
+                rename
+                    .iter()
+                    .map(|(a, b)| format!("{} {}", a, b))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub enum Expression {
     Identifier(String),
@@ -51,9 +104,51 @@ pub enum Expression {
     Real(String),
     Rational(i64, u64),
     Vector(Vec<Expression>),
-    Procedure(Vec<String>, Vec<Definition>, Vec<Expression>),
+    Procedure(SchemeProcedure),
     ProcedureCall(Box<Expression>, Vec<Expression>),
     Conditional(Box<(Expression, Expression, Option<Expression>)>),
+    Datum(Box<Statement>),
+}
+
+// external representation, code as data
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Expression::Identifier(s) => write!(f, "{}", s),
+            Expression::Integer(n) => write!(f, "{}", n),
+            Expression::Real(n) => write!(f, "{:?}", n),
+            Expression::Rational(a, b) => write!(f, "{}/{}", a, b),
+            Expression::Vector(vector) => write!(f, "({})", join_displayable(vector)),
+            Expression::Procedure(p) => write!(f, "{}", p),
+            Expression::ProcedureCall(op, args) => write!(f, "({} {})", op, join_displayable(args)),
+            Expression::Conditional(cond) => {
+                let (test, consequent, alternative) = &cond.as_ref();
+                match alternative {
+                    Some(alt) => write!(f, "({} {}{})", test, consequent, alt),
+                    None => write!(f, "({} {})", test, consequent),
+                }
+            }
+            Expression::Datum(datum) => write!(f, "{}", datum),
+            Expression::Boolean(true) => write!(f, "#t"),
+            Expression::Boolean(false) => write!(f, "#f"),
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct SchemeProcedure(pub Vec<String>, pub Vec<Definition>, pub Vec<Expression>);
+
+impl fmt::Display for SchemeProcedure {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let SchemeProcedure(formals, definitions, expressions) = self;
+        write!(
+            f,
+            "(lambda ({}) {} {})",
+            formals.join(" "),
+            join_displayable(definitions),
+            join_displayable(expressions)
+        )
+    }
 }
 
 pub struct Parser<TokenIter: Iterator<Item = Token>> {
@@ -108,6 +203,12 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                 },
                 Token::RightParen => syntax_error!("Unmatched Parentheses!"),
                 Token::VecConsIntro => Ok(expr_to_statement!(self.vector()?)),
+                Token::Quote => Ok(expr_to_statement!(Expression::Datum(Box::new(match self
+                    .parse()?
+                {
+                    Some(statement) => statement,
+                    None => syntax_error!("expect something to be quoted!"),
+                },)))),
                 _ => syntax_error!("unsupported grammar"),
             },
             None => Ok(None),
@@ -216,7 +317,11 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
         if expressions.is_empty() {
             syntax_error!("no expression in procedure body")
         }
-        Ok(Expression::Procedure(formals, definitions, expressions))
+        Ok(Expression::Procedure(SchemeProcedure(
+            formals,
+            definitions,
+            expressions,
+        )))
     }
 
     fn import_declaration(&mut self) -> Result<Statement> {
@@ -349,7 +454,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
 }
 
 pub fn simple_procedure(formals: Vec<String>, expression: Expression) -> Expression {
-    Expression::Procedure(formals, vec![], vec![expression])
+    Expression::Procedure(SchemeProcedure(formals, vec![], vec![expression]))
 }
 #[test]
 fn empty() -> Result<()> {
@@ -404,6 +509,7 @@ fn vector() -> Result<()> {
         Token::VecConsIntro,
         Token::Integer(1),
         Token::Boolean(false),
+        Token::RightParen,
     ];
     let mut parser = Parser::new(tokens.into_iter());
     let ast = parser.parse()?;
@@ -608,15 +714,17 @@ fn lambda() -> Result<()> {
         assert_eq!(
             ast,
             Some(Statement::Expression(Expression::Procedure(
-                vec!["x".to_string()],
-                vec![Definition("y".to_string(), Expression::Integer(1))],
-                vec![Expression::ProcedureCall(
-                    Box::new(Expression::Identifier("+".to_string())),
-                    vec![
-                        Expression::Identifier("x".to_string()),
-                        Expression::Identifier("y".to_string())
-                    ]
-                )]
+                SchemeProcedure(
+                    vec!["x".to_string()],
+                    vec![Definition("y".to_string(), Expression::Integer(1))],
+                    vec![Expression::ProcedureCall(
+                        Box::new(Expression::Identifier("+".to_string())),
+                        vec![
+                            Expression::Identifier("x".to_string()),
+                            Expression::Identifier("y".to_string())
+                        ]
+                    )]
+                )
             )))
         );
     }
