@@ -70,15 +70,6 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         })
     }
 
-    fn equals(
-        mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>,
-    ) -> Result<ValueType> {
-        match arguments.next() {
-            None => Ok(ValueType::Boolean(true)),
-            Some(first) => Ok(ValueType::Boolean(arguments.all(|item| item == first))),
-        }
-    }
-
     // fn cond(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {}
 
     macro_rules! comparision {
@@ -96,7 +87,7 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
                                             }
                                             last = ValueType::Number(b);
                                         }
-                                        _ => logic_error!("great comparision can only between numbers!"),
+                                        _ => logic_error!("{} comparision can only between numbers!", stringify!($operator)),
                                     }
                                 }
                                 Ok(ValueType::Boolean(true))
@@ -107,6 +98,7 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         }
     }
 
+    comparision!(equals, ==);
     comparision!(greater, >);
     comparision!(greater_equal, >=);
     comparision!(less, <);
