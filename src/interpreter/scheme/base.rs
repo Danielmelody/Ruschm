@@ -151,6 +151,11 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         }
     }
 
+    fn vector(arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
+        let vector: Result<Vec<ValueType>> = arguments.collect();
+        Ok(ValueType::Vector(vector?))
+    }
+
     fn display(
         mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>,
     ) -> Result<ValueType> {
@@ -199,6 +204,7 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         function_mapping!("sqrt", sqrt),
         function_mapping!("display", display),
         function_mapping!("newline", newline),
+        function_mapping!("vector", vector),
     ]
     .iter()
     .cloned()

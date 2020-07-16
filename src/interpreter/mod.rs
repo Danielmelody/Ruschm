@@ -177,6 +177,7 @@ pub enum ValueType {
     Number(Number),
     Boolean(bool),
     Procedure(Procedure),
+    Vector(Vec<ValueType>),
     Void,
 }
 
@@ -192,6 +193,14 @@ impl fmt::Display for ValueType {
             ValueType::Void => write!(f, "Void"),
             ValueType::Boolean(true) => write!(f, "#t"),
             ValueType::Boolean(false) => write!(f, "#f"),
+            ValueType::Vector(vec) => write!(
+                f,
+                "#({})",
+                vec.iter()
+                    .map(|v| format!("{}", v))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
         }
     }
 }
@@ -288,6 +297,13 @@ impl<'a> Interpreter<'a> {
             Expression::Procedure(formals, definitions, expressions) => ValueType::Procedure(
                 Procedure::User(formals.clone(), definitions.clone(), expressions.clone()),
             ),
+            Expression::Vector(vector) => {
+                let mut values = Vec::with_capacity(vector.len());
+                for expr in vector {
+                    values.push(self.eval_expression(expr, env)?);
+                }
+                ValueType::Vector(values)
+            }
             Expression::Conditional(cond) => {
                 let &(test, consequent, alternative) = &cond.as_ref();
                 match self.eval_expression(&test, env)? {
