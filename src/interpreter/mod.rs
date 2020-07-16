@@ -19,11 +19,21 @@ macro_rules! logic_error {
 
 pub mod scheme;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub enum Number {
     Integer(i64),
     Real(f64),
     Rational(i64, i64),
+}
+
+impl PartialEq for Number {
+    fn eq(&self, other: &Number) -> bool {
+        match upcast_oprands((*self, *other)) {
+            NumberBinaryOperand::Integer(a, b) => a.eq(&b),
+            NumberBinaryOperand::Rational(a1, a2, b1, b2) => (a1 * b2).eq(&(b1 * a2)),
+            NumberBinaryOperand::Real(a, b) => a.eq(&b),
+        }
+    }
 }
 
 impl PartialOrd for Number {
@@ -496,17 +506,17 @@ fn arithmetic() -> Result<()> {
         _ => panic!("sqrt result should be a number"),
     }
 
-    for (cmp, result) in [">", "<", ">=", "<="]
+    for (cmp, result) in [">", "<", ">=", "<=", "="]
         .iter()
-        .zip([false, false, true, true].iter())
+        .zip([false, false, true, true, true].iter())
     {
         assert_eq!(
             interpreter.eval_root_expression(Expression::ProcedureCall(
                 Box::new(Expression::Identifier(cmp.to_string())),
                 vec![
                     Expression::Integer(1),
-                    Expression::Integer(1),
-                    Expression::Integer(1),
+                    Expression::Rational(1, 1),
+                    Expression::Real("1.0".to_string()),
                 ],
             ))?,
             ValueType::Boolean(*result)
