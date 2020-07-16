@@ -24,17 +24,17 @@ macro_rules! def_to_statement {
     };
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Statement {
     ImportDeclaration(Vec<ImportSet>),
     Definition(Definition),
     Expression(Expression),
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Definition(pub String, pub Expression);
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum ImportSet {
     Direct(String),
     Only(Box<ImportSet>, Vec<String>),
@@ -50,7 +50,7 @@ pub enum Expression {
     Boolean(bool),
     Real(String),
     Rational(i64, u64),
-    Procedure(Vec<String>, Box<Expression>),
+    Procedure(Vec<String>, Vec<Definition>, Vec<Expression>),
     ProcedureCall(Box<Expression>, Vec<Expression>),
     Conditional(Box<(Expression, Expression, Option<Expression>)>),
 }
@@ -86,8 +86,8 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Option<Statement>> {
-        match self.advance(1).take() {
+    pub fn parse_current(&mut self) -> Result<Option<Statement>> {
+        match self.current.take() {
             Some(token) => match token {
                 Token::Boolean(b) => Ok(Some(Statement::Expression(Expression::Boolean(b)))),
                 Token::Integer(a) => Ok(expr_to_statement!(Expression::Integer(a))),
@@ -110,6 +110,11 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
             },
             None => Ok(None),
         }
+    }
+
+    pub fn parse(&mut self) -> Result<Option<Statement>> {
+        self.advance(1);
+        self.parse_current()
     }
 
     // we know it will never be RightParen
@@ -172,12 +177,31 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
             }
             _ => syntax_error!("expect identifiers"),
         }
-        match (self.parse()?, self.advance(1)) {
-            (Some(Statement::Expression(body)), Some(Token::RightParen)) => {
-                Ok(Expression::Procedure(formals, Box::new(body)))
+        self.procedure_body(formals)
+    }
+
+    fn procedure_body(&mut self, formals: Vec<String>) -> Result<Expression> {
+        let statements = self.collect(Self::parse_current)?;
+        let mut definitions = vec![];
+        let mut expressions = vec![];
+        for statement in statements {
+            match statement {
+                Some(Statement::Definition(def)) => {
+                    if expressions.is_empty() {
+                        definitions.push(def)
+                    } else {
+                        syntax_error!("unexpect definition af expression")
+                    }
+                }
+                Some(Statement::Expression(expr)) => expressions.push(expr),
+                None => syntax_error!("lambda body empty"),
+                _ => syntax_error!("procedure body can only contains definition or expression"),
             }
-            _ => syntax_error!("lambda body empty"),
         }
+        if expressions.is_empty() {
+            syntax_error!("no expression in procedure body")
+        }
+        Ok(Expression::Procedure(formals, definitions, expressions))
     }
 
     fn import_declaration(&mut self) -> Result<Statement> {
@@ -269,17 +293,8 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
             Some(Token::LeftParen) => match self.advance(1).take() {
                 Some(Token::Identifier(identifier)) => {
                     let formals = self.collect(Self::get_identifier)?;
-                    let body = match self.parse()? {
-                        Some(Statement::Expression(body)) => Ok(Definition(
-                            identifier,
-                            Expression::Procedure(formals, Box::new(body)),
-                        )),
-                        _ => syntax_error!("expect procedure body"),
-                    };
-                    match self.advance(1) {
-                        Some(Token::RightParen) => body,
-                        _ => syntax_error!("expect a close parentheses after procedure body"),
-                    }
+                    let body = self.procedure_body(formals)?;
+                    Ok(Definition(identifier, body))
                 }
                 _ => syntax_error!("define: expect identifier and expression"),
             },
@@ -318,6 +333,9 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     }
 }
 
+pub fn simple_procedure(formals: Vec<String>, expression: Expression) -> Expression {
+    Expression::Procedure(formals, vec![], vec![expression])
+}
 #[test]
 fn empty() -> Result<()> {
     let tokens = Vec::new();
@@ -450,15 +468,15 @@ fn definition() -> Result<()> {
                 ast,
                 def_to_statement!(Definition(
                     "add".to_string(),
-                    Expression::Procedure(
+                    simple_procedure(
                         vec!["x".to_string(), "y".to_string()],
-                        Box::new(Expression::ProcedureCall(
+                        Expression::ProcedureCall(
                             Box::new(Expression::Identifier("+".to_string())),
                             vec![
                                 Expression::Identifier("x".to_string()),
                                 Expression::Identifier("y".to_string()),
                             ]
-                        ))
+                        )
                     )
                 ))
             )
@@ -500,35 +518,100 @@ fn nested_procedure_call() -> Result<()> {
 
 #[test]
 fn lambda() -> Result<()> {
-    let tokens = vec![
-        Token::LeftParen,
-        Token::Identifier("lambda".to_string()),
-        Token::LeftParen,
-        Token::Identifier("x".to_string()),
-        Token::Identifier("y".to_string()),
-        Token::RightParen,
-        Token::LeftParen,
-        Token::Identifier("+".to_string()),
-        Token::Identifier("x".to_string()),
-        Token::Identifier("y".to_string()),
-        Token::RightParen,
-        Token::RightParen,
-    ];
-    let mut parser = Parser::new(tokens.into_iter());
-    let ast = parser.parse()?;
-    assert_eq!(
-        ast,
-        Some(Statement::Expression(Expression::Procedure(
-            vec!["x".to_string(), "y".to_string()],
-            Box::new(Expression::ProcedureCall(
-                Box::new(Expression::Identifier("+".to_string())),
-                vec![
-                    Expression::Identifier("x".to_string()),
-                    Expression::Identifier("y".to_string())
-                ]
-            ))
-        )))
-    );
+    {
+        let tokens = vec![
+            Token::LeftParen,
+            Token::Identifier("lambda".to_string()),
+            Token::LeftParen,
+            Token::Identifier("x".to_string()),
+            Token::Identifier("y".to_string()),
+            Token::RightParen,
+            Token::LeftParen,
+            Token::Identifier("+".to_string()),
+            Token::Identifier("x".to_string()),
+            Token::Identifier("y".to_string()),
+            Token::RightParen,
+            Token::RightParen,
+        ];
+        let mut parser = Parser::new(tokens.into_iter());
+        let ast = parser.parse()?;
+        assert_eq!(
+            ast,
+            Some(Statement::Expression(simple_procedure(
+                vec!["x".to_string(), "y".to_string()],
+                Expression::ProcedureCall(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![
+                        Expression::Identifier("x".to_string()),
+                        Expression::Identifier("y".to_string())
+                    ]
+                )
+            )))
+        );
+    }
+
+    {
+        let tokens = vec![
+            Token::LeftParen,
+            Token::Identifier("lambda".to_string()),
+            Token::LeftParen,
+            Token::Identifier("x".to_string()),
+            Token::RightParen,
+            Token::LeftParen,
+            Token::Identifier("define".to_string()),
+            Token::Identifier("y".to_string()),
+            Token::Integer(1),
+            Token::RightParen,
+            Token::LeftParen,
+            Token::Identifier("+".to_string()),
+            Token::Identifier("x".to_string()),
+            Token::Identifier("y".to_string()),
+            Token::RightParen,
+            Token::RightParen,
+        ];
+        let mut parser = Parser::new(tokens.into_iter());
+        let ast = parser.parse()?;
+        assert_eq!(
+            ast,
+            Some(Statement::Expression(Expression::Procedure(
+                vec!["x".to_string()],
+                vec![Definition("y".to_string(), Expression::Integer(1))],
+                vec![Expression::ProcedureCall(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![
+                        Expression::Identifier("x".to_string()),
+                        Expression::Identifier("y".to_string())
+                    ]
+                )]
+            )))
+        );
+    }
+
+    {
+        let tokens = vec![
+            Token::LeftParen,
+            Token::Identifier("lambda".to_string()),
+            Token::LeftParen,
+            Token::Identifier("x".to_string()),
+            Token::RightParen,
+            Token::LeftParen,
+            Token::Identifier("define".to_string()),
+            Token::Identifier("y".to_string()),
+            Token::Integer(1),
+            Token::RightParen,
+            Token::RightParen,
+        ];
+        let mut parser = Parser::new(tokens.into_iter());
+        let err = parser.parse();
+        assert_eq!(
+            err,
+            Err(Error {
+                category: ErrorType::Syntax,
+                message: "no expression in procedure body".to_string()
+            })
+        );
+    }
+
     Ok(())
 }
 
