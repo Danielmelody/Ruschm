@@ -168,7 +168,7 @@ impl PartialEq for BuildinFunction {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Procedure {
-    User(Vec<String>, Expression),
+    User(Vec<String>, Vec<Definition>, Vec<Expression>),
     Buildin(BuildinFunction),
 }
 
@@ -228,7 +228,8 @@ impl<'a> Interpreter<'a> {
     fn eval_scheme_procedure<'b>(
         &'a self,
         formals: &Vec<String>,
-        body: &Expression,
+        definitions: &Vec<Definition>,
+        expressions: &Vec<Expression>,
         args: impl Iterator<Item = Result<ValueType>>,
         parent_env: &'b Environment<'b>,
     ) -> Result<ValueType> {
@@ -236,7 +237,18 @@ impl<'a> Interpreter<'a> {
         for (param, arg) in formals.iter().zip(args) {
             child_env.borrow_mut().define(param.clone(), arg?);
         }
-        self.eval_expression(&body, &child_env)
+        for def in definitions {
+            self.define(def, &child_env)?;
+        }
+        match expressions.split_last() {
+            Some((last, before_last)) => {
+                for expr in before_last {
+                    self.eval_expression(expr, &child_env)?;
+                }
+                self.eval_expression(last, &child_env)
+            }
+            None => logic_error!("no expression in function body"),
+        }
     }
 
     pub fn eval_root_expression(&'a self, expression: Expression) -> Result<ValueType> {
@@ -261,15 +273,21 @@ impl<'a> Interpreter<'a> {
                     ValueType::Procedure(Procedure::Buildin(BuildinFunction(fp))) => {
                         fp(evaluated_args)?
                     }
-                    ValueType::Procedure(Procedure::User(formals, body)) => {
-                        self.eval_scheme_procedure(&formals, &body, evaluated_args, parent_env)?
+                    ValueType::Procedure(Procedure::User(formals, definitions, expressions)) => {
+                        self.eval_scheme_procedure(
+                            &formals,
+                            &definitions,
+                            &expressions,
+                            evaluated_args,
+                            parent_env,
+                        )?
                     }
                     _ => logic_error!("expect a procedure here"),
                 }
             }
-            Expression::Procedure(formals, body) => {
-                ValueType::Procedure(Procedure::User(formals.clone(), *body.clone()))
-            }
+            Expression::Procedure(formals, definitions, expressions) => ValueType::Procedure(
+                Procedure::User(formals.clone(), definitions.clone(), expressions.clone()),
+            ),
             Expression::Conditional(cond) => {
                 let &(test, consequent, alternative) = &cond.as_ref();
                 match self.eval_expression(&test, env)? {
@@ -505,7 +523,7 @@ fn buildin_procedural() -> Result<()> {
     let program = vec![
         Statement::Definition(Definition(
             "get-add".to_string(),
-            Expression::Procedure(vec![], Box::new(Expression::Identifier("+".to_string()))),
+            simple_procedure(vec![], Expression::Identifier("+".to_string())),
         )),
         Statement::Expression(Expression::ProcedureCall(
             Box::new(Expression::ProcedureCall(
@@ -528,15 +546,15 @@ fn procedure_definition() -> Result<()> {
     let program = vec![
         Statement::Definition(Definition(
             "add".to_string(),
-            Expression::Procedure(
+            simple_procedure(
                 vec!["x".to_string(), "y".to_string()],
-                Box::new(Expression::ProcedureCall(
+                Expression::ProcedureCall(
                     Box::new(Expression::Identifier("+".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("y".to_string()),
                     ],
-                )),
+                ),
             ),
         )),
         Statement::Expression(Expression::ProcedureCall(
@@ -555,15 +573,15 @@ fn procedure_definition() -> Result<()> {
 fn lambda_call() -> Result<()> {
     let interpreter = Interpreter::new();
     let program = vec![Statement::Expression(Expression::ProcedureCall(
-        Box::new(Expression::Procedure(
+        Box::new(simple_procedure(
             vec!["x".to_string(), "y".to_string()],
-            Box::new(Expression::ProcedureCall(
+            Expression::ProcedureCall(
                 Box::new(Expression::Identifier("+".to_string())),
                 vec![
                     Expression::Identifier("x".to_string()),
                     Expression::Identifier("y".to_string()),
                 ],
-            )),
+            ),
         )),
         vec![Expression::Integer(1), Expression::Integer(2)],
     ))];
@@ -595,15 +613,15 @@ fn local_environment() -> Result<()> {
     let program = vec![
         Statement::Definition(Definition(
             "adda".to_string(),
-            Expression::Procedure(
+            simple_procedure(
                 vec!["x".to_string()],
-                Box::new(Expression::ProcedureCall(
+                Expression::ProcedureCall(
                     Box::new(Expression::Identifier("+".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("a".to_string()),
                     ],
-                )),
+                ),
             ),
         )),
         Statement::Definition(Definition("a".to_string(), Expression::Integer(1))),
@@ -625,28 +643,28 @@ fn procedure_as_data() -> Result<()> {
     let program = vec![
         Statement::Definition(Definition(
             "add".to_string(),
-            Expression::Procedure(
+            simple_procedure(
                 vec!["x".to_string(), "y".to_string()],
-                Box::new(Expression::ProcedureCall(
+                Expression::ProcedureCall(
                     Box::new(Expression::Identifier("+".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("y".to_string()),
                     ],
-                )),
+                ),
             ),
         )),
         Statement::Definition(Definition(
             "apply-op".to_string(),
-            Expression::Procedure(
+            simple_procedure(
                 vec!["op".to_string(), "x".to_string(), "y".to_string()],
-                Box::new(Expression::ProcedureCall(
+                Expression::ProcedureCall(
                     Box::new(Expression::Identifier("op".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("y".to_string()),
                     ],
-                )),
+                ),
             ),
         )),
         Statement::Expression(Expression::ProcedureCall(
