@@ -50,6 +50,7 @@ pub enum Expression {
     Boolean(bool),
     Real(String),
     Rational(i64, u64),
+    Vector(Vec<Expression>),
     Procedure(Vec<String>, Vec<Definition>, Vec<Expression>),
     ProcedureCall(Box<Expression>, Vec<Expression>),
     Conditional(Box<(Expression, Expression, Option<Expression>)>),
@@ -106,9 +107,17 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                     _ => Ok(expr_to_statement!(self.procedure_call()?)),
                 },
                 Token::RightParen => syntax_error!("Unmatched Parentheses!"),
+                Token::VecConsIntro => Ok(expr_to_statement!(self.vector()?)),
                 _ => syntax_error!("unsupported grammar"),
             },
             None => Ok(None),
+        }
+    }
+
+    pub fn parse_current_expression(&mut self) -> Result<Expression> {
+        match self.parse_current()? {
+            Some(Statement::Expression(expr)) => Ok(expr),
+            _ => syntax_error!("expect a expression here"),
         }
     }
 
@@ -164,6 +173,12 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                 }
             }
         }
+    }
+
+    fn vector(&mut self) -> Result<Expression> {
+        Ok(Expression::Vector(
+            self.collect(Self::parse_current_expression)?,
+        ))
     }
 
     fn lambda(&mut self) -> Result<Expression> {
@@ -379,6 +394,25 @@ fn identifier() -> Result<()> {
     assert_eq!(
         ast,
         expr_to_statement!(Expression::Identifier("test".to_string()))
+    );
+    Ok(())
+}
+
+#[test]
+fn vector() -> Result<()> {
+    let tokens = vec![
+        Token::VecConsIntro,
+        Token::Integer(1),
+        Token::Boolean(false),
+    ];
+    let mut parser = Parser::new(tokens.into_iter());
+    let ast = parser.parse()?;
+    assert_eq!(
+        ast,
+        expr_to_statement!(Expression::Vector(vec![
+            Expression::Integer(1),
+            Expression::Boolean(false)
+        ]))
     );
     Ok(())
 }
