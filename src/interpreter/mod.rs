@@ -9,11 +9,11 @@ use std::fmt;
 
 use std::iter::Iterator;
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = std::result::Result<T, SchemeError>;
 
 macro_rules! logic_error {
     ($($arg:tt)*) => (
-        return Err(Error {category: ErrorType::Logic , message: format!($($arg)*) });
+        return Err(SchemeError {category: ErrorType::Logic , message: format!($($arg)*) });
     )
 }
 
@@ -448,7 +448,7 @@ fn arithmetic() -> Result<()> {
             Box::new(Expression::Identifier("/".to_string())),
             vec![Expression::Integer(1), Expression::Integer(0)]
         )),
-        Err(Error {
+        Err(SchemeError {
             category: ErrorType::Logic,
             message: "division by exact zero".to_string()
         }),
@@ -473,7 +473,7 @@ fn arithmetic() -> Result<()> {
             Box::new(Expression::Identifier("min".to_string())),
             vec![Expression::Identifier("+".to_string()),]
         )),
-        Err(Error {
+        Err(SchemeError {
             category: ErrorType::Logic,
             message: "expect a number!".to_string()
         }),
@@ -484,7 +484,7 @@ fn arithmetic() -> Result<()> {
             Box::new(Expression::Identifier("max".to_string())),
             vec![Expression::Identifier("+".to_string())]
         )),
-        Err(Error {
+        Err(SchemeError {
             category: ErrorType::Logic,
             message: "expect a number!".to_string()
         }),
@@ -531,7 +531,7 @@ fn undefined() {
     let interpreter = Interpreter::new();
     assert_eq!(
         interpreter.eval_root_expression(Expression::Identifier("foo".to_string())),
-        Err(Error {
+        Err(SchemeError {
             category: ErrorType::Logic,
             message: "undefined identifier: foo".to_string(),
         })

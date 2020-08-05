@@ -4,12 +4,12 @@ use crate::lexer::Token;
 use std::fmt;
 use std::iter::{FromIterator, Iterator, Peekable};
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = std::result::Result<T, SchemeError>;
 pub type ParseResult = Result<Option<Statement>>;
 
 macro_rules! syntax_error {
     ($($arg:tt)*) => (
-        return Err(Error {category: ErrorType::Syntax, message: format!($($arg)*) });
+        return Err(SchemeError {category: ErrorType::Syntax, message: format!($($arg)*) });
     )
 }
 
@@ -561,7 +561,7 @@ fn unmatched_parantheses() {
     let mut parser = Parser::new(tokens.into_iter());
     assert_eq!(
         parser.parse(),
-        Err(Error {
+        Err(SchemeError {
             category: ErrorType::Syntax,
             message: "Unmatched Parentheses!".to_string()
         })
@@ -747,7 +747,7 @@ fn lambda() -> Result<()> {
         let err = parser.parse();
         assert_eq!(
             err,
-            Err(Error {
+            Err(SchemeError {
                 category: ErrorType::Syntax,
                 message: "no expression in procedure body".to_string()
             })

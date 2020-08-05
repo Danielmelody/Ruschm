@@ -9,7 +9,7 @@ use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-fn main() -> Result<(), error::Error> {
+fn main() -> Result<(), error::SchemeError> {
     Ok(match env::args().skip(1).next() {
         Some(file) => {
             let f = BufReader::new(File::open(file.as_str()).expect("no such file or directory"));
