@@ -4,11 +4,11 @@ use std::fmt;
 use std::iter::Iterator;
 use std::iter::Peekable;
 
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = std::result::Result<T, SchemeError>;
 
 macro_rules! invalid_token {
     ($($arg:tt)*) => (
-        return Err(Error {category: ErrorType::Lexical, message: format!($($arg)*) });
+        return Err(SchemeError {category: ErrorType::Lexical, message: format!($($arg)*) });
     )
 }
 

@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+
+use std::error::Error;
 use std::fmt;
 
 #[derive(Debug, PartialEq)]
@@ -8,12 +11,14 @@ pub enum ErrorType {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Error {
+pub struct SchemeError {
     pub category: ErrorType,
     pub message: String,
 }
 
-impl fmt::Display for Error {
+impl Error for SchemeError {}
+
+impl fmt::Display for SchemeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.category {
             ErrorType::Lexical => write!(f, "Invalid token: {}", self.message),
