@@ -26,6 +26,16 @@ pub enum Number {
     Rational(i64, i64),
 }
 
+impl fmt::Display for Number {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Number::Integer(n) => write!(f, "{}", n),
+            Number::Real(n) => write!(f, "{:?}", n),
+            Number::Rational(a, b) => write!(f, "{}/{}", a, b),
+        }
+    }
+}
+
 impl PartialEq for Number {
     fn eq(&self, other: &Number) -> bool {
         match upcast_oprands((*self, *other)) {
@@ -204,11 +214,7 @@ pub enum ValueType {
 impl fmt::Display for ValueType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ValueType::Number(num) => match num {
-                Number::Integer(n) => write!(f, "{}", n),
-                Number::Real(n) => write!(f, "{:?}", n),
-                Number::Rational(a, b) => write!(f, "{}/{}", a, b),
-            },
+            ValueType::Number(num) => write!(f, "{}", num),
             ValueType::Datum(expr) => write!(f, "{}", expr),
             ValueType::Procedure(p) => write!(f, "{}", p),
             ValueType::Void => write!(f, "Void"),
@@ -234,7 +240,7 @@ fn check_division_by_zero(num: i64) -> Result<()> {
 }
 
 pub struct Interpreter<'a> {
-    env: RefCell<Environment<'a>>,
+    pub env: RefCell<Environment<'a>>,
 }
 
 impl<'a> Interpreter<'a> {
