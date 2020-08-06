@@ -245,21 +245,16 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn define<'b>(
-        &'a self,
-        definition: &Definition,
-        env: &'b RefCell<Environment<'b>>,
-    ) -> Result<()> {
+    pub fn define<'b>(definition: &Definition, env: &'b RefCell<Environment<'b>>) -> Result<()> {
         let Definition(name, expression) = definition;
-        let value = self.eval_expression(&expression, env)?;
+        let value = Self::eval_expression(&expression, env)?;
         env.borrow_mut().define(name.clone(), value);
         Ok(())
     }
 
-    fn eval_scheme_procedure<'b>(
-        &'a self,
+    fn apply_scheme_procedure<'b>(
         formals: &Vec<String>,
-        definitions: &Vec<Definition>,
+        internal_definitions: &Vec<Definition>,
         expressions: &Vec<Expression>,
         args: impl Iterator<Item = Result<ValueType>>,
         parent_env: &'b Environment<'b>,
@@ -268,70 +263,79 @@ impl<'a> Interpreter<'a> {
         for (param, arg) in formals.iter().zip(args) {
             child_env.borrow_mut().define(param.clone(), arg?);
         }
-        for def in definitions {
-            self.define(def, &child_env)?;
+        for def in internal_definitions {
+            Self::define(def, &child_env)?;
         }
         match expressions.split_last() {
             Some((last, before_last)) => {
                 for expr in before_last {
-                    self.eval_expression(expr, &child_env)?;
+                    Self::eval_expression(expr, &child_env)?;
                 }
-                self.eval_expression(last, &child_env)
+                Self::eval_expression(last, &child_env)
             }
             None => logic_error!("no expression in function body"),
         }
     }
 
-    pub fn eval_root_expression(&'a self, expression: Expression) -> Result<ValueType> {
-        self.eval_expression(&expression, &self.env)
+    pub(self) fn eval_root_expression(&'a self, expression: Expression) -> Result<ValueType> {
+        Self::eval_expression(&expression, &self.env)
+    }
+
+    pub fn apply_procedure<'b>(
+        procedure: &Procedure,
+        evaluated_args: Box<dyn Iterator<Item = Result<ValueType>> + '_>,
+        env: &'b RefCell<Environment<'b>>,
+    ) -> Result<ValueType> {
+        let parent_env = &env.borrow();
+        Ok(match procedure {
+            Procedure::Buildin(BuildinProcedure(_, function_pointer)) => {
+                function_pointer(evaluated_args)?
+            }
+            Procedure::User(SchemeProcedure(formals, definitions, expressions)) => {
+                Self::apply_scheme_procedure(
+                    &formals,
+                    &definitions,
+                    &expressions,
+                    evaluated_args,
+                    parent_env,
+                )?
+            }
+        })
     }
 
     pub fn eval_expression<'b>(
-        &'a self,
         expression: &Expression,
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<ValueType> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
-                let procedure = self.eval_expression(procedure_expr, env)?;
+                let first = Self::eval_expression(procedure_expr, env)?;
                 let evaluated_args = Box::new(
                     arguments
                         .into_iter()
-                        .map(|arg| self.eval_expression(arg, env)),
+                        .map(|arg| Self::eval_expression(arg, env)),
                 );
-                let parent_env = &env.borrow();
-                match procedure {
-                    ValueType::Procedure(Procedure::Buildin(BuildinProcedure(_, fp))) => {
-                        fp(evaluated_args)?
+                match first {
+                    ValueType::Procedure(procedure) => {
+                        Self::apply_procedure(&procedure, evaluated_args, env)?
                     }
-                    ValueType::Procedure(Procedure::User(SchemeProcedure(
-                        formals,
-                        definitions,
-                        expressions,
-                    ))) => self.eval_scheme_procedure(
-                        &formals,
-                        &definitions,
-                        &expressions,
-                        evaluated_args,
-                        parent_env,
-                    )?,
                     _ => logic_error!("expect a procedure here"),
                 }
             }
             Expression::Vector(vector) => {
                 let mut values = Vec::with_capacity(vector.len());
                 for expr in vector {
-                    values.push(self.eval_expression(expr, env)?);
+                    values.push(Self::eval_expression(expr, env)?);
                 }
                 ValueType::Vector(values)
             }
             Expression::Procedure(scheme) => ValueType::Procedure(Procedure::User(scheme.clone())),
             Expression::Conditional(cond) => {
                 let &(test, consequent, alternative) = &cond.as_ref();
-                match self.eval_expression(&test, env)? {
-                    ValueType::Boolean(true) => self.eval_expression(&consequent, env)?,
+                match Self::eval_expression(&test, env)? {
+                    ValueType::Boolean(true) => Self::eval_expression(&consequent, env)?,
                     ValueType::Boolean(false) => match alternative {
-                        Some(alter) => self.eval_expression(&alter, env)?,
+                        Some(alter) => Self::eval_expression(&alter, env)?,
                         None => ValueType::Void,
                     },
                     _ => logic_error!("if condition should be a boolean expression"),
@@ -353,22 +357,21 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn eval_ast<'b>(
-        &'a self,
         ast: &Statement,
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<Option<ValueType>> {
         Ok(match ast {
             Statement::ImportDeclaration(_) => None, // TODO
-            Statement::Expression(expr) => Some(self.eval_expression(&expr, env)?),
+            Statement::Expression(expr) => Some(Self::eval_expression(&expr, env)?),
             Statement::Definition(definition) => {
-                self.define(definition, env)?;
+                Self::define(definition, env)?;
                 None
             }
         })
     }
 
     pub fn eval_root_ast(&'a self, ast: &Statement) -> Result<Option<ValueType>> {
-        self.eval_ast(ast, &self.env)
+        Self::eval_ast(ast, &self.env)
     }
 
     pub fn eval_program(
