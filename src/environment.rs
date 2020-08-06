@@ -2,6 +2,7 @@ use crate::interpreter::scheme;
 use crate::interpreter::ValueType;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct Environment<'a> {
     parent: Option<&'a Environment<'a>>,
     definitions: HashMap<String, ValueType>,
