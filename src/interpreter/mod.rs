@@ -3,10 +3,10 @@ use crate::environment::Environment;
 use crate::error::*;
 use crate::lexer::*;
 use crate::parser::*;
+use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
-
 use std::iter::Iterator;
 
 type Result<T> = std::result::Result<T, SchemeError>;
@@ -154,11 +154,10 @@ impl std::ops::Div<Number> for Number {
     }
 }
 
+pub type ArgVec = SmallVec<[ValueType; 4]>;
+
 #[derive(Clone)]
-pub struct BuildinProcedure(
-    &'static str,
-    fn(Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType>,
-);
+pub struct BuildinProcedure(&'static str, fn(ArgVec) -> Result<ValueType>);
 
 impl fmt::Display for BuildinProcedure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -256,12 +255,12 @@ impl<'a> Interpreter<'a> {
         formals: &Vec<String>,
         internal_definitions: &Vec<Definition>,
         expressions: &Vec<Expression>,
-        args: impl Iterator<Item = Result<ValueType>>,
+        args: ArgVec,
         parent_env: &'b Environment<'b>,
     ) -> Result<ValueType> {
         let child_env = RefCell::new(Environment::child(parent_env));
-        for (param, arg) in formals.iter().zip(args) {
-            child_env.borrow_mut().define(param.clone(), arg?);
+        for (param, arg) in formals.iter().zip(args.into_iter()) {
+            child_env.borrow_mut().define(param.clone(), arg);
         }
         for def in internal_definitions {
             Self::define(def, &child_env)?;
@@ -283,7 +282,7 @@ impl<'a> Interpreter<'a> {
 
     pub fn apply_procedure<'b>(
         procedure: &Procedure,
-        evaluated_args: Box<dyn Iterator<Item = Result<ValueType>> + '_>,
+        evaluated_args: ArgVec,
         env: &'b RefCell<Environment<'b>>,
     ) -> Result<ValueType> {
         let parent_env = &env.borrow();
@@ -310,14 +309,13 @@ impl<'a> Interpreter<'a> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
                 let first = Self::eval_expression(procedure_expr, env)?;
-                let evaluated_args = Box::new(
-                    arguments
-                        .into_iter()
-                        .map(|arg| Self::eval_expression(arg, env)),
-                );
+                let evaluated_args: Result<ArgVec> = arguments
+                    .into_iter()
+                    .map(|arg| Self::eval_expression(arg, env))
+                    .collect();
                 match first {
                     ValueType::Procedure(procedure) => {
-                        Self::apply_procedure(&procedure, evaluated_args, env)?
+                        Self::apply_procedure(&procedure, evaluated_args?, env)?
                     }
                     _ => logic_error!("expect a procedure here"),
                 }

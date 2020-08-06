@@ -2,23 +2,24 @@ use crate::interpreter::*;
 use std::collections::HashMap;
 
 pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
-    fn add(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
-        arguments.try_fold(ValueType::Number(Number::Integer(0)), |a, b| {
-            match (a, b?) {
+    fn add(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+        arguments
+            .into_iter()
+            .try_fold(ValueType::Number(Number::Integer(0)), |a, b| match (a, b) {
                 (ValueType::Number(num1), ValueType::Number(num2)) => {
                     Ok(ValueType::Number(num1 + num2))
                 }
                 _ => logic_error!("expect a number!"),
-            }
-        })
+            })
     }
 
-    fn sub(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
-        let init = match arguments.next() {
+    fn sub(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+        let mut iter = arguments.into_iter();
+        let init = match iter.next() {
             None => logic_error!("'-' needs at least one argument"),
-            Some(first) => match first? {
-                ValueType::Number(first_num) => match arguments.next() {
-                    Some(second) => match second? {
+            Some(first) => match first {
+                ValueType::Number(first_num) => match iter.next() {
+                    Some(second) => match second {
                         ValueType::Number(second_num) => ValueType::Number(first_num - second_num),
                         _ => logic_error!("expect a number!"),
                     },
@@ -27,7 +28,7 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
                 _ => logic_error!("expect a number!"),
             },
         };
-        arguments.try_fold(init, |a, b| match (a, b?) {
+        iter.try_fold(init, |a, b| match (a, b) {
             (ValueType::Number(num1), ValueType::Number(num2)) => {
                 Ok(ValueType::Number(num1 - num2))
             }
@@ -35,23 +36,23 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         })
     }
 
-    fn mul(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
-        arguments.try_fold(ValueType::Number(Number::Integer(1)), |a, b| {
-            match (a, b?) {
-                (ValueType::Number(num1), ValueType::Number(num2)) => {
-                    Ok(ValueType::Number(num1 * num2))
-                }
-                _ => logic_error!("expect a number!"),
+    fn mul(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+        let mut iter = arguments.into_iter();
+        iter.try_fold(ValueType::Number(Number::Integer(1)), |a, b| match (a, b) {
+            (ValueType::Number(num1), ValueType::Number(num2)) => {
+                Ok(ValueType::Number(num1 * num2))
             }
+            _ => logic_error!("expect a number!"),
         })
     }
 
-    fn div(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
-        let init = match arguments.next() {
+    fn div(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+        let mut iter = arguments.into_iter();
+        let init = match iter.next() {
             None => logic_error!("'-' needs at least one argument"),
-            Some(first) => match first? {
-                ValueType::Number(first_num) => match arguments.next() {
-                    Some(second) => match second? {
+            Some(first) => match first {
+                ValueType::Number(first_num) => match iter.next() {
+                    Some(second) => match second {
                         ValueType::Number(second_num) => {
                             ValueType::Number((first_num / second_num)?)
                         }
@@ -62,7 +63,7 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
                 _ => logic_error!("expect a number!"),
             },
         };
-        arguments.try_fold(init, |a, b| match (a, b?) {
+        iter.try_fold(init, |a, b| match (a, b) {
             (ValueType::Number(num1), ValueType::Number(num2)) => {
                 Ok(ValueType::Number((num1 / num2)?))
             }
@@ -70,17 +71,18 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         })
     }
 
-    // fn cond(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {}
+    // fn cond(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {}
 
     macro_rules! comparision {
         ($name:tt, $operator:tt) => {
-            fn $name(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
-                match arguments.next() {
+            fn $name(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+                let mut iter = arguments.into_iter();
+                match iter.next() {
                     None => Ok(ValueType::Boolean(true)),
                     Some(first) => {
-                                let mut last = first?;
-                                for current in arguments {
-                                    match (last, current?) {
+                                let mut last = first;
+                                for current in iter {
+                                    match (last, current) {
                                         (ValueType::Number(a), ValueType::Number(b)) => {
                                             if !(a $operator b) {
                                                 return Ok(ValueType::Boolean(false));
@@ -106,11 +108,12 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
 
     macro_rules! first_of_order {
         ($name:tt, $cmp:tt) => {
-            fn $name(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
-                match arguments.next() {
+            fn $name(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+                let mut iter = arguments.into_iter();
+                match iter.next() {
                     None => logic_error!("min requires at least one argument!"),
-                    Some(Ok(ValueType::Number(num))) => {
-                        arguments.try_fold(ValueType::Number(num), |a, b| match (a, b?) {
+                    Some(ValueType::Number(num)) => {
+                        iter.try_fold(ValueType::Number(num), |a, b| match (a, b) {
                                     (ValueType::Number(num1), ValueType::Number(num2)) => {
                                         Ok(ValueType::Number(match num1 $cmp num2 {
                                             true => upcast_oprands((num1, num2)).lhs(),
@@ -120,7 +123,6 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
                                     _ => logic_error!("expect a number!"),
                                 })
                             },
-                    Some(Err(e)) => Err(e),
                     _ => logic_error!("expect a number!"),
                     }
                 }
@@ -130,40 +132,35 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
     first_of_order!(max, >);
     first_of_order!(min, <);
 
-    fn sqrt(mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
-        match arguments.next() {
-            Some(Ok(ValueType::Number(number))) => Ok(ValueType::Number(match number {
+    fn sqrt(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+        match arguments.into_iter().next() {
+            Some(ValueType::Number(number)) => Ok(ValueType::Number(match number {
                 Number::Integer(num) => Number::Real((num as f64).sqrt()),
                 Number::Real(num) => Number::Real(num.sqrt()),
                 Number::Rational(a, b) => Number::Real((a as f64 / b as f64).sqrt()),
             })),
-            Some(Err(e)) => Err(e),
             Some(other) => logic_error!("sqrt requires a number, got {:?}", other),
             _ => logic_error!("sqrt takes exactly one argument"),
         }
     }
 
-    fn vector(arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>) -> Result<ValueType> {
-        let vector: Result<Vec<ValueType>> = arguments.collect();
-        Ok(ValueType::Vector(vector?))
+    fn vector(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+        let vector: Vec<ValueType> = arguments.into_iter().collect();
+        Ok(ValueType::Vector(vector))
     }
 
-    fn display(
-        mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>,
-    ) -> Result<ValueType> {
-        Ok(match arguments.next() {
+    fn display(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+        Ok(match arguments.into_iter().next() {
             Some(value) => {
-                print!("{}", value?);
+                print!("{}", value);
                 ValueType::Void
             }
             None => logic_error!("display takes exactly one argument"),
         })
     }
 
-    fn newline(
-        mut arguments: Box<dyn Iterator<Item = Result<ValueType>> + '_>,
-    ) -> Result<ValueType> {
-        Ok(match arguments.next() {
+    fn newline(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+        Ok(match arguments.into_iter().next() {
             None => {
                 println!("");
                 ValueType::Void
