@@ -1,14 +1,16 @@
 use crate::interpreter::scheme;
 use crate::interpreter::ValueType;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Clone)]
-pub struct Environment<'a> {
-    parent: Option<&'a Environment<'a>>,
+pub struct Environment {
+    parent: Option<Rc<RefCell<Environment>>>,
     definitions: HashMap<String, ValueType>,
 }
 
-impl<'a> Environment<'a> {
+impl Environment {
     pub fn new() -> Self {
         Self {
             parent: None,
@@ -16,7 +18,7 @@ impl<'a> Environment<'a> {
         }
     }
 
-    pub fn child(parent: &'a Environment<'a>) -> Self {
+    pub fn child(parent: Rc<RefCell<Environment>>) -> Self {
         Self {
             parent: Some(parent),
             definitions: HashMap::new(),
@@ -27,13 +29,13 @@ impl<'a> Environment<'a> {
         self.definitions.insert(name, value);
     }
 
-    pub fn get(&self, name: &str) -> Option<&ValueType> {
+    pub fn get(&self, name: &str) -> Option<ValueType> {
         match self.definitions.get(name) {
-            None => match self.parent {
+            None => match &self.parent {
                 None => return None,
-                Some(parent) => parent.get(name),
+                Some(parent) => parent.borrow().get(name),
             },
-            value => value,
+            Some(value) => Some(value.clone()),
         }
     }
 }
