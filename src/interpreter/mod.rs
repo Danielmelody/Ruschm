@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
 use std::iter::Iterator;
+use std::rc::Rc;
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
@@ -239,37 +240,32 @@ fn check_division_by_zero(num: i64) -> Result<()> {
     }
 }
 
-pub struct Interpreter<'a> {
-    pub env: RefCell<Environment<'a>>,
+pub struct Interpreter {
+    pub env: Rc<RefCell<Environment>>,
 }
 
-impl<'a> Interpreter<'a> {
+impl Interpreter {
     pub fn new() -> Self {
         Self {
-            env: RefCell::new(Environment::new()),
+            env: Rc::new(RefCell::new(Environment::new())),
         }
     }
 
-    pub fn define<'b>(definition: &Definition, env: &'b RefCell<Environment<'b>>) -> Result<()> {
-        let Definition(name, expression) = definition;
-        let value = Self::eval_expression(&expression, env)?;
-        env.borrow_mut().define(name.clone(), value);
-        Ok(())
-    }
-
-    fn apply_scheme_procedure<'b>(
+    fn apply_scheme_procedure(
         formals: &Vec<String>,
         internal_definitions: &Vec<Definition>,
         expressions: &Vec<Expression>,
         args: ArgVec,
-        parent_env: &'b Environment<'b>,
+        parent_env: &Rc<RefCell<Environment>>,
     ) -> Result<ValueType> {
-        let child_env = RefCell::new(Environment::child(parent_env));
+        let child_env = Rc::new(RefCell::new(Environment::child(parent_env.clone())));
         for (param, arg) in formals.iter().zip(args.into_iter()) {
             child_env.borrow_mut().define(param.clone(), arg);
         }
-        for def in internal_definitions {
-            Self::define(def, &child_env)?;
+        for Definition(name, expr) in internal_definitions {
+            child_env
+                .borrow_mut()
+                .define(name.clone(), Self::eval_expression(&expr, &child_env)?)
         }
         match expressions.split_last() {
             Some((last, before_last)) => {
@@ -282,16 +278,15 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub(self) fn eval_root_expression(&'a self, expression: Expression) -> Result<ValueType> {
+    pub(self) fn eval_root_expression(&self, expression: Expression) -> Result<ValueType> {
         Self::eval_expression(&expression, &self.env)
     }
 
-    pub fn apply_procedure<'b>(
+    pub fn apply_procedure(
         procedure: &Procedure,
         evaluated_args: ArgVec,
-        env: &'b RefCell<Environment<'b>>,
+        env: &Rc<RefCell<Environment>>,
     ) -> Result<ValueType> {
-        let parent_env = &env.borrow();
         Ok(match procedure {
             Procedure::Buildin(BuildinProcedure(_, function_pointer)) => {
                 function_pointer(evaluated_args)?
@@ -302,15 +297,15 @@ impl<'a> Interpreter<'a> {
                     &definitions,
                     &expressions,
                     evaluated_args,
-                    parent_env,
+                    env,
                 )?
             }
         })
     }
 
-    pub fn eval_expression<'b>(
+    pub fn eval_expression(
         expression: &Expression,
-        env: &'b RefCell<Environment<'b>>,
+        env: &Rc<RefCell<Environment>>,
     ) -> Result<ValueType> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
@@ -360,33 +355,31 @@ impl<'a> Interpreter<'a> {
         })
     }
 
-    pub fn eval_ast<'b>(
-        ast: &Statement,
-        env: &'b RefCell<Environment<'b>>,
-    ) -> Result<Option<ValueType>> {
+    pub fn eval_ast(ast: &Statement, env: Rc<RefCell<Environment>>) -> Result<Option<ValueType>> {
         Ok(match ast {
             Statement::ImportDeclaration(_) => None, // TODO
-            Statement::Expression(expr) => Some(Self::eval_expression(&expr, env)?),
-            Statement::Definition(definition) => {
-                Self::define(definition, env)?;
+            Statement::Expression(expr) => Some(Self::eval_expression(&expr, &env)?),
+            Statement::Definition(Definition(name, expr)) => {
+                let value = Self::eval_expression(&expr, &env)?;
+                env.borrow_mut().define(name.clone(), value);
                 None
             }
         })
     }
 
-    pub fn eval_root_ast(&'a self, ast: &Statement) -> Result<Option<ValueType>> {
-        Self::eval_ast(ast, &self.env)
+    pub fn eval_root_ast(&self, ast: &Statement) -> Result<Option<ValueType>> {
+        Self::eval_ast(ast, self.env.clone())
     }
 
-    pub fn eval_program(
-        &'a self,
+    pub fn eval_program<'a>(
+        &self,
         asts: impl IntoIterator<Item = &'a Statement>,
     ) -> Result<Option<ValueType>> {
         asts.into_iter()
-            .try_fold(None, |_, ast| self.eval_root_ast(ast))
+            .try_fold(None, |_, ast| self.eval_root_ast(&ast))
     }
 
-    pub fn eval(&'a self, char_stream: impl Iterator<Item = char>) -> Result<Option<ValueType>> {
+    pub fn eval(&self, char_stream: impl Iterator<Item = char>) -> Result<Option<ValueType>> {
         {
             let mut char_visitor = char_stream.peekable();
             let mut last_value = None;
