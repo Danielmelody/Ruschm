@@ -99,10 +99,10 @@ impl fmt::Display for ImportSet {
 #[derive(PartialEq, Debug, Clone)]
 pub enum Expression {
     Identifier(String),
-    Integer(i64),
+    Integer(i32),
     Boolean(bool),
     Real(String),
-    Rational(i64, u64),
+    Rational(i32, u32),
     Vector(Vec<Expression>),
     Procedure(SchemeProcedure),
     ProcedureCall(Box<Expression>, Vec<Expression>),

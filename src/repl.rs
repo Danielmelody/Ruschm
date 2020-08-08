@@ -21,7 +21,7 @@ fn check_bracket_closed(chars: impl Iterator<Item = char>) -> bool {
 }
 
 pub fn run() {
-    let it = interpreter::Interpreter::new();
+    let it = interpreter::Interpreter::<f32>::new();
     let mut rl = Editor::<()>::new();
     io::stdout().flush().unwrap();
     let mut source = String::new();
