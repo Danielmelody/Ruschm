@@ -17,8 +17,8 @@ pub enum Token {
     Identifier(String),
     Boolean(bool),
     Real(String), // delay the conversion of demical literal to internal represent for different virtual machines (for example, fixed-points).
-    Integer(i64),
-    Rational(i64, u64),
+    Integer(i32),
+    Rational(i32, u32),
     Character(char),
     String(String),
     LeftParen,
@@ -389,19 +389,19 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
                                 self.advance(1);
                                 self.digital10(&mut denominator)?;
                                 break Ok(Some(Token::Rational(
-                                    number_literal.parse::<i64>().unwrap(),
-                                    denominator.parse::<u64>().unwrap(),
+                                    number_literal.parse::<i32>().unwrap(),
+                                    denominator.parse::<u32>().unwrap(),
                                 )));
                             }
                             _ => {
                                 test_delimiter(*nc)?;
                                 break Ok(Some(Token::Integer(
-                                    number_literal.parse::<i64>().unwrap(),
+                                    number_literal.parse::<i32>().unwrap(),
                                 )));
                             }
                         },
                         None => {
-                            break Ok(Some(Token::Integer(number_literal.parse::<i64>().unwrap())))
+                            break Ok(Some(Token::Integer(number_literal.parse::<i32>().unwrap())))
                         }
                     }
                 }

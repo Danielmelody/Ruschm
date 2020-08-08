@@ -1,8 +1,11 @@
 use crate::interpreter::*;
 use std::collections::HashMap;
 
-pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
-    fn add(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
+) -> HashMap<String, ValueType<InternalReal>> {
+    fn add<InternalReal: RealNumberInternalTrait>(
+        arguments: impl IntoIterator<Item = ValueType<InternalReal>>,
+    ) -> Result<ValueType<InternalReal>> {
         arguments
             .into_iter()
             .try_fold(ValueType::Number(Number::Integer(0)), |a, b| match (a, b) {
@@ -13,7 +16,9 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
             })
     }
 
-    fn sub(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+    fn sub<InternalReal: RealNumberInternalTrait>(
+        arguments: impl IntoIterator<Item = ValueType<InternalReal>>,
+    ) -> Result<ValueType<InternalReal>> {
         let mut iter = arguments.into_iter();
         let init = match iter.next() {
             None => logic_error!("'-' needs at least one argument"),
@@ -36,7 +41,9 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         })
     }
 
-    fn mul(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+    fn mul<InternalReal: RealNumberInternalTrait>(
+        arguments: impl IntoIterator<Item = ValueType<InternalReal>>,
+    ) -> Result<ValueType<InternalReal>> {
         let mut iter = arguments.into_iter();
         iter.try_fold(ValueType::Number(Number::Integer(1)), |a, b| match (a, b) {
             (ValueType::Number(num1), ValueType::Number(num2)) => {
@@ -46,7 +53,9 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         })
     }
 
-    fn div(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+    fn div<InternalReal: RealNumberInternalTrait>(
+        arguments: impl IntoIterator<Item = ValueType<InternalReal>>,
+    ) -> Result<ValueType<InternalReal>> {
         let mut iter = arguments.into_iter();
         let init = match iter.next() {
             None => logic_error!("'-' needs at least one argument"),
@@ -71,11 +80,11 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         })
     }
 
-    // fn cond(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {}
+    // fn cond(arguments: impl IntoIterator<Item = ValueType<InternalReal>>) -> Result<ValueType> {}
 
     macro_rules! comparision {
         ($name:tt, $operator:tt) => {
-            fn $name(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+            fn $name<InternalReal: RealNumberInternalTrait>(arguments: impl IntoIterator<Item = ValueType<InternalReal>>) -> Result<ValueType<InternalReal>> {
                 let mut iter = arguments.into_iter();
                 match iter.next() {
                     None => Ok(ValueType::Boolean(true)),
@@ -108,7 +117,7 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
 
     macro_rules! first_of_order {
         ($name:tt, $cmp:tt) => {
-            fn $name(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+            fn $name<InternalReal: RealNumberInternalTrait>(arguments: impl IntoIterator<Item = ValueType<InternalReal>>) -> Result<ValueType<InternalReal>> {
                 let mut iter = arguments.into_iter();
                 match iter.next() {
                     None => logic_error!("min requires at least one argument!"),
@@ -132,24 +141,32 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
     first_of_order!(max, >);
     first_of_order!(min, <);
 
-    fn sqrt(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+    fn sqrt<InternalReal: RealNumberInternalTrait>(
+        arguments: impl IntoIterator<Item = ValueType<InternalReal>>,
+    ) -> Result<ValueType<InternalReal>> {
         match arguments.into_iter().next() {
             Some(ValueType::Number(number)) => Ok(ValueType::Number(match number {
-                Number::Integer(num) => Number::Real((num as f64).sqrt()),
+                Number::Integer(num) => Number::Real(InternalReal::from(num).unwrap().sqrt()),
                 Number::Real(num) => Number::Real(num.sqrt()),
-                Number::Rational(a, b) => Number::Real((a as f64 / b as f64).sqrt()),
+                Number::Rational(a, b) => Number::Real(
+                    InternalReal::from(a).unwrap() / InternalReal::from(b).unwrap().sqrt(),
+                ),
             })),
             Some(other) => logic_error!("sqrt requires a number, got {:?}", other),
             _ => logic_error!("sqrt takes exactly one argument"),
         }
     }
 
-    fn vector(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
-        let vector: Vec<ValueType> = arguments.into_iter().collect();
+    fn vector<InternalReal: RealNumberInternalTrait>(
+        arguments: impl IntoIterator<Item = ValueType<InternalReal>>,
+    ) -> Result<ValueType<InternalReal>> {
+        let vector: Vec<ValueType<InternalReal>> = arguments.into_iter().collect();
         Ok(ValueType::Vector(vector))
     }
 
-    fn display(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+    fn display<InternalReal: RealNumberInternalTrait>(
+        arguments: impl IntoIterator<Item = ValueType<InternalReal>>,
+    ) -> Result<ValueType<InternalReal>> {
         Ok(match arguments.into_iter().next() {
             Some(value) => {
                 print!("{}", value);
@@ -159,11 +176,13 @@ pub(crate) fn base_library<'a>() -> HashMap<String, ValueType> {
         })
     }
 
-    fn newline(arguments: impl IntoIterator<Item = ValueType>) -> Result<ValueType> {
+    fn newline<InternalReal: RealNumberInternalTrait>(
+        arguments: impl IntoIterator<Item = ValueType<InternalReal>>,
+    ) -> Result<ValueType<InternalReal>> {
         Ok(match arguments.into_iter().next() {
             None => {
                 println!("");
-                ValueType::Void
+                ValueType::<InternalReal>::Void
             }
             _ => logic_error!("display takes exactly one argument"),
         })

@@ -24,3 +24,4 @@ crate-type = ["lib"]
 [dependencies]
 rustyline = "6.2.0"
 smallvec = "1.4.1"
+num-traits = "0.2"

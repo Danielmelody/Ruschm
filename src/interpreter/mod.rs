@@ -3,6 +3,7 @@ use crate::environment::Environment;
 use crate::error::*;
 use crate::lexer::*;
 use crate::parser::*;
+use num_traits::real::Real;
 use smallvec::SmallVec;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -20,14 +21,21 @@ macro_rules! logic_error {
 
 pub mod scheme;
 
-#[derive(Debug, Clone, Copy)]
-pub enum Number {
-    Integer(i64),
-    Real(f64),
-    Rational(i64, i64),
+pub trait RealNumberInternalTrait: fmt::Display + fmt::Debug + Real
+where
+    Self: std::marker::Sized,
+{
 }
 
-impl fmt::Display for Number {
+impl<T: fmt::Display + fmt::Debug + Real> RealNumberInternalTrait for T {}
+#[derive(Debug, Clone, Copy)]
+pub enum Number<InternalReal: RealNumberInternalTrait> {
+    Integer(i32),
+    Real(InternalReal),
+    Rational(i32, i32),
+}
+
+impl<InternalReal: RealNumberInternalTrait> fmt::Display for Number<InternalReal> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Number::Integer(n) => write!(f, "{}", n),
@@ -37,8 +45,8 @@ impl fmt::Display for Number {
     }
 }
 
-impl PartialEq for Number {
-    fn eq(&self, other: &Number) -> bool {
+impl<InternalReal: RealNumberInternalTrait> PartialEq for Number<InternalReal> {
+    fn eq(&self, other: &Number<InternalReal>) -> bool {
         match upcast_oprands((*self, *other)) {
             NumberBinaryOperand::Integer(a, b) => a.eq(&b),
             NumberBinaryOperand::Rational(a1, a2, b1, b2) => (a1 * b2).eq(&(b1 * a2)),
@@ -47,8 +55,8 @@ impl PartialEq for Number {
     }
 }
 
-impl PartialOrd for Number {
-    fn partial_cmp(&self, other: &Number) -> Option<Ordering> {
+impl<InternalReal: RealNumberInternalTrait> PartialOrd for Number<InternalReal> {
+    fn partial_cmp(&self, other: &Number<InternalReal>) -> Option<Ordering> {
         match upcast_oprands((*self, *other)) {
             NumberBinaryOperand::Integer(a, b) => a.partial_cmp(&b),
             NumberBinaryOperand::Rational(a1, a2, b1, b2) => (a1 * b2).partial_cmp(&(b1 * a2)),
@@ -57,23 +65,31 @@ impl PartialOrd for Number {
     }
 }
 
-enum NumberBinaryOperand {
-    Integer(i64, i64),
-    Real(f64, f64),
-    Rational(i64, i64, i64, i64),
+enum NumberBinaryOperand<InternalReal> {
+    Integer(i32, i32),
+    Real(InternalReal, InternalReal),
+    Rational(i32, i32, i32, i32),
 }
 
 // Integer => Rational => Real
-fn upcast_oprands(operand: (Number, Number)) -> NumberBinaryOperand {
+fn upcast_oprands<InternalReal: RealNumberInternalTrait>(
+    operand: (Number<InternalReal>, Number<InternalReal>),
+) -> NumberBinaryOperand<InternalReal> {
     match operand {
-        (Number::Rational(dividend, dividor), Number::Real(b)) => {
-            NumberBinaryOperand::Real(dividend as f64 / dividor as f64, b)
+        (Number::Rational(dividend, dividor), Number::Real(b)) => NumberBinaryOperand::Real(
+            InternalReal::from(dividend).unwrap() / InternalReal::from(dividor).unwrap(),
+            b,
+        ),
+        (Number::Real(a), Number::Rational(dividend, dividor)) => NumberBinaryOperand::Real(
+            a,
+            InternalReal::from(dividend).unwrap() / InternalReal::from(dividor).unwrap(),
+        ),
+        (Number::Integer(a), Number::Real(b)) => {
+            NumberBinaryOperand::Real(InternalReal::from(a).unwrap(), b)
         }
-        (Number::Real(a), Number::Rational(dividend, dividor)) => {
-            NumberBinaryOperand::Real(a, dividend as f64 / dividor as f64)
+        (Number::Real(a), Number::Integer(b)) => {
+            NumberBinaryOperand::Real(a, InternalReal::from(b).unwrap())
         }
-        (Number::Integer(a), Number::Real(b)) => (NumberBinaryOperand::Real(a as f64, b)),
-        (Number::Real(a), Number::Integer(b)) => (NumberBinaryOperand::Real(a, b as f64)),
         (Number::Rational(dividend, dividor), Number::Integer(b)) => {
             NumberBinaryOperand::Rational(dividend, dividor, b, 1)
         }
@@ -88,8 +104,8 @@ fn upcast_oprands(operand: (Number, Number)) -> NumberBinaryOperand {
     }
 }
 
-impl NumberBinaryOperand {
-    pub fn lhs(&self) -> Number {
+impl<InternalReal: RealNumberInternalTrait> NumberBinaryOperand<InternalReal> {
+    pub fn lhs(&self) -> Number<InternalReal> {
         match self {
             NumberBinaryOperand::Integer(a, _) => Number::Integer(*a),
             NumberBinaryOperand::Real(a, _) => Number::Real(*a),
@@ -97,7 +113,7 @@ impl NumberBinaryOperand {
         }
     }
 
-    pub fn rhs(&self) -> Number {
+    pub fn rhs(&self) -> Number<InternalReal> {
         match self {
             NumberBinaryOperand::Integer(_, b) => Number::Integer(*b),
             NumberBinaryOperand::Real(_, b) => Number::Real(*b),
@@ -106,9 +122,11 @@ impl NumberBinaryOperand {
     }
 }
 
-impl std::ops::Add<Number> for Number {
-    type Output = Number;
-    fn add(self, rhs: Number) -> Number {
+impl<InternalReal: RealNumberInternalTrait> std::ops::Add<Number<InternalReal>>
+    for Number<InternalReal>
+{
+    type Output = Number<InternalReal>;
+    fn add(self, rhs: Number<InternalReal>) -> Number<InternalReal> {
         match upcast_oprands((self, rhs)) {
             NumberBinaryOperand::Integer(a, b) => Number::Integer(a + b),
             NumberBinaryOperand::Real(a, b) => Number::Real(a + b),
@@ -119,9 +137,11 @@ impl std::ops::Add<Number> for Number {
     }
 }
 
-impl std::ops::Sub<Number> for Number {
-    type Output = Number;
-    fn sub(self, rhs: Number) -> Number {
+impl<InternalReal: RealNumberInternalTrait> std::ops::Sub<Number<InternalReal>>
+    for Number<InternalReal>
+{
+    type Output = Number<InternalReal>;
+    fn sub(self, rhs: Number<InternalReal>) -> Number<InternalReal> {
         match upcast_oprands((self, rhs)) {
             NumberBinaryOperand::Integer(a, b) => Number::Integer(a - b),
             NumberBinaryOperand::Real(a, b) => Number::Real(a - b),
@@ -132,9 +152,11 @@ impl std::ops::Sub<Number> for Number {
     }
 }
 
-impl std::ops::Mul<Number> for Number {
-    type Output = Number;
-    fn mul(self, rhs: Number) -> Number {
+impl<InternalReal: RealNumberInternalTrait> std::ops::Mul<Number<InternalReal>>
+    for Number<InternalReal>
+{
+    type Output = Number<InternalReal>;
+    fn mul(self, rhs: Number<InternalReal>) -> Number<InternalReal> {
         match upcast_oprands((self, rhs)) {
             NumberBinaryOperand::Integer(a, b) => Number::Integer(a * b),
             NumberBinaryOperand::Real(a, b) => Number::Real(a * b),
@@ -143,9 +165,11 @@ impl std::ops::Mul<Number> for Number {
     }
 }
 
-impl std::ops::Div<Number> for Number {
-    type Output = Result<Number>;
-    fn div(self, rhs: Number) -> Result<Number> {
+impl<InternalReal: RealNumberInternalTrait> std::ops::Div<Number<InternalReal>>
+    for Number<InternalReal>
+{
+    type Output = Result<Number<InternalReal>>;
+    fn div(self, rhs: Number<InternalReal>) -> Result<Number<InternalReal>> {
         match upcast_oprands((self, rhs)) {
             NumberBinaryOperand::Integer(a, b) => {
                 check_division_by_zero(b)?;
@@ -165,35 +189,38 @@ impl std::ops::Div<Number> for Number {
     }
 }
 
-pub type ArgVec = SmallVec<[ValueType; 4]>;
+pub type ArgVec<InternalReal> = SmallVec<[ValueType<InternalReal>; 4]>;
 
 #[derive(Clone)]
-pub struct BuildinProcedure(&'static str, fn(ArgVec) -> Result<ValueType>);
+pub struct BuildinProcedure<InternalReal: RealNumberInternalTrait>(
+    &'static str,
+    fn(ArgVec<InternalReal>) -> Result<ValueType<InternalReal>>,
+);
 
-impl fmt::Display for BuildinProcedure {
+impl<InternalReal: RealNumberInternalTrait> fmt::Display for BuildinProcedure<InternalReal> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "<build-in procedure ({})>", self.0)
     }
 }
-impl fmt::Debug for BuildinProcedure {
+impl<InternalReal: RealNumberInternalTrait> fmt::Debug for BuildinProcedure<InternalReal> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self)
     }
 }
 
-impl PartialEq for BuildinProcedure {
+impl<InternalReal: RealNumberInternalTrait> PartialEq for BuildinProcedure<InternalReal> {
     fn eq(&self, rhs: &Self) -> bool {
         self.0 == rhs.0 && self.1 as usize == rhs.1 as usize
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Procedure {
+pub enum Procedure<InternalReal: RealNumberInternalTrait> {
     User(SchemeProcedure),
-    Buildin(BuildinProcedure),
+    Buildin(BuildinProcedure<InternalReal>),
 }
 
-impl fmt::Display for Procedure {
+impl<InternalReal: RealNumberInternalTrait> fmt::Display for Procedure<InternalReal> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Procedure::User(procedure) => write!(f, "{}", procedure),
@@ -203,16 +230,16 @@ impl fmt::Display for Procedure {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ValueType {
-    Number(Number),
+pub enum ValueType<InternalReal: RealNumberInternalTrait> {
+    Number(Number<InternalReal>),
     Boolean(bool),
     Datum(Box<Statement>),
-    Procedure(Procedure),
-    Vector(Vec<ValueType>),
+    Procedure(Procedure<InternalReal>),
+    Vector(Vec<ValueType<InternalReal>>),
     Void,
 }
 
-impl fmt::Display for ValueType {
+impl<InternalReal: RealNumberInternalTrait> fmt::Display for ValueType<InternalReal> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ValueType::Number(num) => write!(f, "{}", num),
@@ -233,21 +260,21 @@ impl fmt::Display for ValueType {
     }
 }
 
-fn check_division_by_zero(num: i64) -> Result<()> {
+fn check_division_by_zero(num: i32) -> Result<()> {
     match num {
         0 => logic_error!("division by exact zero"),
         _ => Ok(()),
     }
 }
 
-pub struct Interpreter {
-    pub env: Rc<RefCell<Environment>>,
+pub struct Interpreter<InternalReal: RealNumberInternalTrait = f32> {
+    pub env: Rc<RefCell<Environment<InternalReal>>>,
 }
 
-impl Interpreter {
-    pub fn new() -> Self {
+impl<InternalReal: RealNumberInternalTrait> Interpreter<InternalReal> {
+    pub fn new() -> Interpreter<InternalReal> {
         Self {
-            env: Rc::new(RefCell::new(Environment::new())),
+            env: Rc::new(RefCell::new(Environment::<InternalReal>::new())),
         }
     }
 
@@ -255,9 +282,9 @@ impl Interpreter {
         formals: &Vec<String>,
         internal_definitions: &Vec<Definition>,
         expressions: &Vec<Expression>,
-        args: ArgVec,
-        parent_env: &Rc<RefCell<Environment>>,
-    ) -> Result<ValueType> {
+        args: ArgVec<InternalReal>,
+        parent_env: &Rc<RefCell<Environment<InternalReal>>>,
+    ) -> Result<ValueType<InternalReal>> {
         let child_env = Rc::new(RefCell::new(Environment::child(parent_env.clone())));
         for (param, arg) in formals.iter().zip(args.into_iter()) {
             child_env.borrow_mut().define(param.clone(), arg);
@@ -278,15 +305,18 @@ impl Interpreter {
         }
     }
 
-    pub(self) fn eval_root_expression(&self, expression: Expression) -> Result<ValueType> {
+    pub(self) fn eval_root_expression(
+        &self,
+        expression: Expression,
+    ) -> Result<ValueType<InternalReal>> {
         Self::eval_expression(&expression, &self.env)
     }
 
     pub fn apply_procedure(
-        procedure: &Procedure,
-        evaluated_args: ArgVec,
-        env: &Rc<RefCell<Environment>>,
-    ) -> Result<ValueType> {
+        procedure: &Procedure<InternalReal>,
+        evaluated_args: ArgVec<InternalReal>,
+        env: &Rc<RefCell<Environment<InternalReal>>>,
+    ) -> Result<ValueType<InternalReal>> {
         Ok(match procedure {
             Procedure::Buildin(BuildinProcedure(_, function_pointer)) => {
                 function_pointer(evaluated_args)?
@@ -305,12 +335,12 @@ impl Interpreter {
 
     pub fn eval_expression(
         expression: &Expression,
-        env: &Rc<RefCell<Environment>>,
-    ) -> Result<ValueType> {
+        env: &Rc<RefCell<Environment<InternalReal>>>,
+    ) -> Result<ValueType<InternalReal>> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
                 let first = Self::eval_expression(procedure_expr, env)?;
-                let evaluated_args: Result<ArgVec> = arguments
+                let evaluated_args: Result<ArgVec<InternalReal>> = arguments
                     .into_iter()
                     .map(|arg| Self::eval_expression(arg, env))
                     .collect();
@@ -343,11 +373,11 @@ impl Interpreter {
             Expression::Datum(datum) => ValueType::Datum(datum.clone()),
             Expression::Boolean(value) => ValueType::Boolean(*value),
             Expression::Integer(value) => ValueType::Number(Number::Integer(*value)),
-            Expression::Real(number_literal) => {
-                ValueType::Number(Number::Real(number_literal.parse::<f64>().unwrap()))
-            }
+            Expression::Real(number_literal) => ValueType::Number(Number::Real(
+                InternalReal::from(number_literal.parse::<f64>().unwrap()).unwrap(),
+            )),
             // TODO: apply gcd here.
-            Expression::Rational(a, b) => ValueType::Number(Number::Rational(*a, *b as i64)),
+            Expression::Rational(a, b) => ValueType::Number(Number::Rational(*a, *b as i32)),
             Expression::Identifier(ident) => match env.borrow().get(ident.as_str()) {
                 Some(value) => value.clone(),
                 None => logic_error!("undefined identifier: {}", ident),
@@ -355,7 +385,10 @@ impl Interpreter {
         })
     }
 
-    pub fn eval_ast(ast: &Statement, env: Rc<RefCell<Environment>>) -> Result<Option<ValueType>> {
+    pub fn eval_ast(
+        ast: &Statement,
+        env: Rc<RefCell<Environment<InternalReal>>>,
+    ) -> Result<Option<ValueType<InternalReal>>> {
         Ok(match ast {
             Statement::ImportDeclaration(_) => None, // TODO
             Statement::Expression(expr) => Some(Self::eval_expression(&expr, &env)?),
@@ -367,19 +400,22 @@ impl Interpreter {
         })
     }
 
-    pub fn eval_root_ast(&self, ast: &Statement) -> Result<Option<ValueType>> {
+    pub fn eval_root_ast(&self, ast: &Statement) -> Result<Option<ValueType<InternalReal>>> {
         Self::eval_ast(ast, self.env.clone())
     }
 
     pub fn eval_program<'a>(
         &self,
         asts: impl IntoIterator<Item = &'a Statement>,
-    ) -> Result<Option<ValueType>> {
+    ) -> Result<Option<ValueType<InternalReal>>> {
         asts.into_iter()
             .try_fold(None, |_, ast| self.eval_root_ast(&ast))
     }
 
-    pub fn eval(&self, char_stream: impl Iterator<Item = char>) -> Result<Option<ValueType>> {
+    pub fn eval(
+        &self,
+        char_stream: impl Iterator<Item = char>,
+    ) -> Result<Option<ValueType<InternalReal>>> {
         {
             let mut char_visitor = char_stream.peekable();
             let mut last_value = None;
@@ -397,7 +433,7 @@ impl Interpreter {
 
 #[test]
 fn number() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     assert_eq!(
         interpreter.eval_root_expression(Expression::Integer(-1))?,
         ValueType::Number(Number::Integer(-1))
@@ -415,7 +451,7 @@ fn number() -> Result<()> {
 
 #[test]
 fn arithmetic() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     assert_eq!(
         interpreter.eval_root_expression(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
@@ -502,7 +538,9 @@ fn arithmetic() -> Result<()> {
         Box::new(Expression::Identifier("sqrt".to_string())),
         vec![Expression::Integer(-4)],
     ))? {
-        ValueType::Number(Number::Real(should_be_nan)) => assert!(should_be_nan.is_nan()),
+        ValueType::Number(Number::Real(should_be_nan)) => {
+            assert!(num_traits::Float::is_nan(should_be_nan))
+        }
         _ => panic!("sqrt result should be a number"),
     }
 
@@ -528,7 +566,7 @@ fn arithmetic() -> Result<()> {
 
 #[test]
 fn undefined() {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     assert_eq!(
         interpreter.eval_root_expression(Expression::Identifier("foo".to_string())),
         Err(SchemeError {
@@ -540,7 +578,7 @@ fn undefined() {
 
 #[test]
 fn variable_definition() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     let program = vec![
         Statement::Definition(Definition("a".to_string(), Expression::Integer(1))),
         Statement::Definition(Definition(
@@ -558,7 +596,7 @@ fn variable_definition() -> Result<()> {
 
 #[test]
 fn buildin_procedural() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     let program = vec![
         Statement::Definition(Definition(
             "get-add".to_string(),
@@ -581,7 +619,7 @@ fn buildin_procedural() -> Result<()> {
 
 #[test]
 fn procedure_definition() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     let program = vec![
         Statement::Definition(Definition(
             "add".to_string(),
@@ -610,7 +648,7 @@ fn procedure_definition() -> Result<()> {
 
 #[test]
 fn lambda_call() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     let program = vec![Statement::Expression(Expression::ProcedureCall(
         Box::new(simple_procedure(
             vec!["x".to_string(), "y".to_string()],
@@ -633,7 +671,7 @@ fn lambda_call() -> Result<()> {
 
 #[test]
 fn condition() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     let program = vec![Statement::Expression(Expression::Conditional(Box::new((
         Expression::Boolean(true),
         Expression::Integer(1),
@@ -648,7 +686,7 @@ fn condition() -> Result<()> {
 
 #[test]
 fn local_environment() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     let program = vec![
         Statement::Definition(Definition(
             "adda".to_string(),
@@ -678,7 +716,7 @@ fn local_environment() -> Result<()> {
 
 #[test]
 fn procedure_as_data() -> Result<()> {
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::<f32>::new();
     let program = vec![
         Statement::Definition(Definition(
             "add".to_string(),
