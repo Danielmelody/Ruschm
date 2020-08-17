@@ -103,6 +103,8 @@ pub enum Expression {
     Boolean(bool),
     Real(String),
     Rational(i32, u32),
+    Character(char),
+    String(String),
     Vector(Vec<Expression>),
     Procedure(SchemeProcedure),
     ProcedureCall(Box<Expression>, Vec<Expression>),
@@ -128,6 +130,8 @@ impl fmt::Display for Expression {
                     None => write!(f, "({} {})", test, consequent),
                 }
             }
+            Expression::Character(c) => write!(f, "#\\{}", c),
+            Expression::String(ref s) => write!(f, "\"{}\"", s),
             Expression::Datum(datum) => write!(f, "{}", datum),
             Expression::Boolean(true) => write!(f, "#t"),
             Expression::Boolean(false) => write!(f, "#f"),
@@ -203,6 +207,8 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                 },
                 Token::RightParen => syntax_error!("Unmatched Parentheses!"),
                 Token::VecConsIntro => Ok(expr_to_statement!(self.vector()?)),
+                Token::Character(c) => Ok(expr_to_statement!(Expression::Character(c))),
+                Token::String(s) => Ok(expr_to_statement!(Expression::String(s))),
                 Token::Quote => Ok(expr_to_statement!(Expression::Datum(Box::new(match self
                     .parse()?
                 {
@@ -519,6 +525,18 @@ fn vector() -> Result<()> {
             Expression::Integer(1),
             Expression::Boolean(false)
         ]))
+    );
+    Ok(())
+}
+
+#[test]
+fn string() -> Result<()> {
+    let tokens = vec![Token::String("hello world".to_string())];
+    let mut parser = Parser::new(tokens.into_iter());
+    let ast = parser.parse()?;
+    assert_eq!(
+        ast,
+        expr_to_statement!(Expression::String("hello world".to_string()))
     );
     Ok(())
 }
