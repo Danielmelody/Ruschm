@@ -233,6 +233,8 @@ impl<InternalReal: RealNumberInternalTrait> fmt::Display for Procedure<InternalR
 pub enum ValueType<InternalReal: RealNumberInternalTrait> {
     Number(Number<InternalReal>),
     Boolean(bool),
+    Character(char),
+    String(String),
     Datum(Box<Statement>),
     Procedure(Procedure<InternalReal>),
     Vector(Vec<ValueType<InternalReal>>),
@@ -248,6 +250,8 @@ impl<InternalReal: RealNumberInternalTrait> fmt::Display for ValueType<InternalR
             ValueType::Void => write!(f, "Void"),
             ValueType::Boolean(true) => write!(f, "#t"),
             ValueType::Boolean(false) => write!(f, "#f"),
+            ValueType::Character(c) => write!(f, "#\\{}", c),
+            ValueType::String(ref s) => write!(f, "\"{}\"", s),
             ValueType::Vector(vec) => write!(
                 f,
                 "#({})",
@@ -358,6 +362,8 @@ impl<InternalReal: RealNumberInternalTrait> Interpreter<InternalReal> {
                 }
                 ValueType::Vector(values)
             }
+            Expression::Character(c) => ValueType::Character(*c),
+            Expression::String(string) => ValueType::String(string.clone()),
             Expression::Procedure(scheme) => ValueType::Procedure(Procedure::User(scheme.clone())),
             Expression::Conditional(cond) => {
                 let &(test, consequent, alternative) = &cond.as_ref();
