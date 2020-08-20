@@ -4,6 +4,8 @@ use std::collections::HashMap;
 pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
 ) -> HashMap<String, Value<InternalReal>> {
     fn add<InternalReal: RealNumberInternalTrait>(
+        _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
         arguments: impl IntoIterator<Item = Value<InternalReal>>,
     ) -> Result<Value<InternalReal>> {
         arguments
@@ -15,6 +17,8 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
     }
 
     fn sub<InternalReal: RealNumberInternalTrait>(
+        _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
         arguments: impl IntoIterator<Item = Value<InternalReal>>,
     ) -> Result<Value<InternalReal>> {
         let mut iter = arguments.into_iter();
@@ -38,6 +42,8 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
     }
 
     fn mul<InternalReal: RealNumberInternalTrait>(
+        _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
         arguments: impl IntoIterator<Item = Value<InternalReal>>,
     ) -> Result<Value<InternalReal>> {
         let mut iter = arguments.into_iter();
@@ -48,6 +54,8 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
     }
 
     fn div<InternalReal: RealNumberInternalTrait>(
+        _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
         arguments: impl IntoIterator<Item = Value<InternalReal>>,
     ) -> Result<Value<InternalReal>> {
         let mut iter = arguments.into_iter();
@@ -74,7 +82,11 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
 
     macro_rules! comparision {
         ($name:tt, $operator:tt) => {
-            fn $name<InternalReal: RealNumberInternalTrait>(arguments: impl IntoIterator<Item = Value<InternalReal>>) -> Result<Value<InternalReal>> {
+            fn $name<InternalReal: RealNumberInternalTrait>(
+                 _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
+                arguments: impl IntoIterator<Item = Value<InternalReal>>
+            ) -> Result<Value<InternalReal>> {
                 let mut iter = arguments.into_iter();
                 match iter.next() {
                     None => Ok(Value::Boolean(true)),
@@ -107,7 +119,11 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
 
     macro_rules! first_of_order {
         ($name:tt, $cmp:tt) => {
-            fn $name<InternalReal: RealNumberInternalTrait>(arguments: impl IntoIterator<Item = Value<InternalReal>>) -> Result<Value<InternalReal>> {
+            fn $name<InternalReal: RealNumberInternalTrait>(
+                 _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
+                arguments: impl IntoIterator<Item = Value<InternalReal>>
+            ) -> Result<Value<InternalReal>> {
                 let mut iter = arguments.into_iter();
                 match iter.next() {
                     None => logic_error!("min requires at least one argument!"),
@@ -132,6 +148,8 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
     first_of_order!(min, <);
 
     fn sqrt<InternalReal: RealNumberInternalTrait>(
+        _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
         arguments: impl IntoIterator<Item = Value<InternalReal>>,
     ) -> Result<Value<InternalReal>> {
         match arguments.into_iter().next() {
@@ -148,6 +166,8 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
     }
 
     fn vector<InternalReal: RealNumberInternalTrait>(
+        _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
         arguments: impl IntoIterator<Item = Value<InternalReal>>,
     ) -> Result<Value<InternalReal>> {
         let vector: Vec<Value<InternalReal>> = arguments.into_iter().collect();
@@ -155,6 +175,8 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
     }
 
     fn display<InternalReal: RealNumberInternalTrait>(
+        _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
         arguments: impl IntoIterator<Item = Value<InternalReal>>,
     ) -> Result<Value<InternalReal>> {
         Ok(match arguments.into_iter().next() {
@@ -167,6 +189,8 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
     }
 
     fn newline<InternalReal: RealNumberInternalTrait>(
+        _: Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>,
+        _: Option<Rc<RefCell<dyn IEnvironment<InternalReal> + '_>>>,
         arguments: impl IntoIterator<Item = Value<InternalReal>>,
     ) -> Result<Value<InternalReal>> {
         Ok(match arguments.into_iter().next() {
@@ -182,7 +206,7 @@ pub(crate) fn base_library<'a, InternalReal: RealNumberInternalTrait>(
         ($ident:tt, $function:tt) => {
             (
                 $ident.to_string(),
-                Value::Procedure(Procedure::Buildin(BuildinProcedure($ident, $function))),
+                Value::Procedure(Procedure::new_buildin(BuildinProcedure($ident, $function))),
             )
         };
     }

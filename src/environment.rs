@@ -5,14 +5,18 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-pub trait IEnvironment<R: RealNumberInternalTrait> {
-    fn new() -> Self;
+pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug {
+    fn new() -> Self
+    where
+        Self: Sized;
     fn define(&mut self, name: String, value: Value<R>);
     fn get(&self, name: &str) -> Option<Value<R>>;
-    fn child(parent: Rc<RefCell<Self>>) -> Self;
+    fn child(parent: Rc<RefCell<Self>>) -> Self
+    where
+        Self: Sized;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StandardEnv<InternalReal: RealNumberInternalTrait> {
     parent: Option<Rc<RefCell<StandardEnv<InternalReal>>>>,
     definitions: HashMap<String, Value<InternalReal>>,
