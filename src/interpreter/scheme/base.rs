@@ -204,32 +204,51 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     macro_rules! function_mapping {
-        ($ident:tt, $function:tt) => {
+        ($ident:tt, $parameter_length:expr, $function:tt) => {
             (
                 $ident.to_string(),
-                Value::Procedure(Procedure::new_buildin(BuildinProcedure($ident, $function))),
+                Value::Procedure(Procedure::new_buildin(BuildinProcedure {
+                    name: $ident,
+                    parameter_length: $parameter_length,
+                    pointer: $function,
+                })),
             )
         };
     }
 
     [
-        function_mapping!("+", add),
-        function_mapping!("-", sub),
-        function_mapping!("*", mul),
-        function_mapping!("/", div),
-        function_mapping!("=", equals),
-        function_mapping!("<", less),
-        function_mapping!("<=", less_equal),
-        function_mapping!(">", greater),
-        function_mapping!(">=", greater_equal),
-        function_mapping!("min", min),
-        function_mapping!("max", max),
-        function_mapping!("sqrt", sqrt),
-        function_mapping!("display", display),
-        function_mapping!("newline", newline),
-        function_mapping!("vector", vector),
+        function_mapping!("+", None, add),
+        function_mapping!("-", None, sub),
+        function_mapping!("*", None, mul),
+        function_mapping!("/", None, div),
+        function_mapping!("=", None, equals),
+        function_mapping!("<", None, less),
+        function_mapping!("<=", None, less_equal),
+        function_mapping!(">", None, greater),
+        function_mapping!(">=", None, greater_equal),
+        function_mapping!("min", None, min),
+        function_mapping!("max", None, max),
+        function_mapping!("sqrt", Some(1), sqrt),
+        function_mapping!("display", Some(1), display),
+        function_mapping!("newline", Some(0), newline),
+        function_mapping!("vector", None, vector),
     ]
     .iter()
     .cloned()
     .collect()
+}
+
+#[test]
+fn buildin_parameters_length() -> Result<()> {
+    let buildin_functions = base_library::<f32, StandardEnv<_>>();
+    assert!(matches!(
+        &buildin_functions["sqrt"],
+        Value::Procedure(Procedure{body: ProcedureBody::Buildin(sqrt), ..}) if sqrt.parameter_length == Some(1)));
+    assert!(matches!(
+        &buildin_functions["display"],
+        Value::Procedure(Procedure{body: ProcedureBody::Buildin(sqrt), ..}) if sqrt.parameter_length == Some(1)));
+    assert!(matches!(
+        &buildin_functions["newline"],
+        Value::Procedure(Procedure{body: ProcedureBody::Buildin(sqrt), ..}) if sqrt.parameter_length == Some(0)));
+    Ok(())
 }
