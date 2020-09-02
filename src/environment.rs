@@ -1,11 +1,18 @@
+#[cfg(test)]
+use crate::error::SchemeError;
 use crate::interpreter::scheme;
+#[cfg(test)]
+use crate::interpreter::Interpreter;
 use crate::interpreter::RealNumberInternalTrait;
 use crate::interpreter::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::iter::IntoIterator;
 use std::rc::Rc;
 
 pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + PartialEq {
+    type DefinitionCollection: IntoIterator;
+
     fn new() -> Self
     where
         Self: Sized;
@@ -18,6 +25,8 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     fn child(parent: Rc<RefCell<Self>>) -> Self
     where
         Self: Sized;
+
+    fn get_local_definitions<'a>(&self) -> &Self::DefinitionCollection;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -27,6 +36,8 @@ pub struct StandardEnv<R: RealNumberInternalTrait> {
 }
 
 impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
+    type DefinitionCollection = HashMap<String, Value<R, Self>>;
+
     fn new() -> Self {
         Self {
             parent: None,
@@ -53,4 +64,21 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
             Some(value) => Some(value.clone()),
         }
     }
+
+    fn get_local_definitions<'a>(&self) -> &Self::DefinitionCollection {
+        &self.definitions
+    }
+}
+
+#[test]
+fn iter_envs() -> Result<(), SchemeError> {
+    let it = Interpreter::<f32, StandardEnv<f32>>::new();
+    {
+        let mut mut_env = it.env.borrow_mut();
+        mut_env.define("a".to_string(), Value::Void);
+    }
+    let env = it.env.borrow();
+    let mut definitions = env.get_local_definitions().into_iter();
+    assert_ne!(definitions.find(|(name, _)| name.as_str() == "a"), None);
+    Ok(())
 }
