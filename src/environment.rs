@@ -15,7 +15,7 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     fn get(&self, name: &str) -> Option<Value<R, Self>>
     where
         Self: Sized;
-    fn child(parent: Rc<RefCell<Self>>) -> Self
+    fn new_child(parent: Rc<RefCell<Self>>) -> Self
     where
         Self: Sized;
 }
@@ -33,7 +33,7 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
             definitions: scheme::base::base_library::<R, StandardEnv<R>>(),
         }
     }
-    fn child(parent: Rc<RefCell<StandardEnv<R>>>) -> Self {
+    fn new_child(parent: Rc<RefCell<StandardEnv<R>>>) -> Self {
         Self {
             parent: Some(parent),
             definitions: HashMap::new(),

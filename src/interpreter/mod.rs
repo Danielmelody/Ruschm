@@ -323,7 +323,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         parent_env: Rc<RefCell<E>>,
         _: Option<Rc<RefCell<E>>>,
     ) -> Result<Value<R, E>> {
-        let child_env = Rc::new(RefCell::new(E::child(parent_env.clone())));
+        let child_env = Rc::new(RefCell::new(E::new_child(parent_env.clone())));
         for (param, arg) in formals.iter().zip(args.into_iter()) {
             child_env.borrow_mut().define(param.clone(), arg);
         }
