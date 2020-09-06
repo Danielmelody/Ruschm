@@ -7,12 +7,9 @@ use crate::interpreter::RealNumberInternalTrait;
 use crate::interpreter::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::iter::IntoIterator;
 use std::rc::Rc;
 
 pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + PartialEq {
-    type DefinitionCollection: IntoIterator;
-
     fn new() -> Self
     where
         Self: Sized;
@@ -26,7 +23,9 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     where
         Self: Sized;
 
-    fn get_local_definitions<'a>(&self) -> &Self::DefinitionCollection;
+    fn iter_local_definitions<'a>(
+        &'a self,
+    ) -> Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, Self>)>>;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -36,7 +35,7 @@ pub struct StandardEnv<R: RealNumberInternalTrait> {
 }
 
 impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
-    type DefinitionCollection = HashMap<String, Value<R, Self>>;
+    // type DefinitionCollection = std::collections::hash_map::Iter<'a， String, Value<R, StandardEnv<R>>>;
 
     fn new() -> Self {
         Self {
@@ -65,8 +64,10 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
         }
     }
 
-    fn get_local_definitions<'a>(&self) -> &Self::DefinitionCollection {
-        &self.definitions
+    fn iter_local_definitions<'a>(
+        &'a self,
+    ) -> Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, Self>)>> {
+        Box::new(self.definitions.iter())
     }
 }
 
@@ -78,7 +79,15 @@ fn iter_envs() -> Result<(), SchemeError> {
         mut_env.define("a".to_string(), Value::Void);
     }
     let env = it.env.borrow();
-    let mut definitions = env.get_local_definitions().into_iter();
-    assert_ne!(definitions.find(|(name, _)| name.as_str() == "a"), None);
+    {
+        let mut definitions = env.iter_local_definitions();
+        assert_ne!(definitions.find(|(name, _)| name.as_str() == "a"), None);
+    }
+
+    {
+        let mut definitions = env.iter_local_definitions();
+        assert_ne!(definitions.find(|(name, _)| name.as_str() == "sqrt"), None);
+    }
+
     Ok(())
 }
