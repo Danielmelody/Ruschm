@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::error::*;
 use crate::lexer::Token;
+use itertools::join;
 use std::fmt;
 use std::iter::{FromIterator, Iterator, Peekable};
 
@@ -26,10 +27,7 @@ macro_rules! def_to_statement {
 }
 
 pub(crate) fn join_displayable(iter: impl IntoIterator<Item = impl fmt::Display>) -> String {
-    iter.into_iter()
-        .map(|d| format!("{}", d))
-        .collect::<Vec<_>>()
-        .join(" ")
+    join(iter.into_iter().map(|d| format!("{}", d)), " ")
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -45,11 +43,7 @@ impl fmt::Display for Statement {
             Statement::ImportDeclaration(imports) => write!(
                 f,
                 "(import {})",
-                imports
-                    .iter()
-                    .map(|i| format!("{}", i))
-                    .collect::<Vec<_>>()
-                    .join(" ")
+                join(imports.iter().map(|i| format!("{}", i)), " ")
             ),
             Statement::Definition(def) => write!(f, "{}", def),
             Statement::Expression(expr) => write!(f, "{}", expr),
@@ -86,11 +80,7 @@ impl fmt::Display for ImportSet {
                 f,
                 "({} {})",
                 lib,
-                rename
-                    .iter()
-                    .map(|(a, b)| format!("{} {}", a, b))
-                    .collect::<Vec<_>>()
-                    .join(" ")
+                join(rename.iter().map(|(a, b)| format!("{} {}", a, b)), " ")
             ),
         }
     }
