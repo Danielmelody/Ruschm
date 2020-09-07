@@ -1,5 +1,4 @@
-#[cfg(test)]
-use crate::error::SchemeError;
+use crate::error::*;
 use crate::interpreter::scheme;
 #[cfg(test)]
 use crate::interpreter::Interpreter;
@@ -17,6 +16,9 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     where
         Self: Sized;
     fn get(&self, name: &str) -> Option<Value<R, Self>>
+    where
+        Self: Sized;
+    fn set(&mut self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError>
     where
         Self: Sized;
     fn new_child(parent: Rc<RefCell<Self>>) -> Self
@@ -62,6 +64,17 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
             },
             Some(value) => Some(value.clone()),
         }
+    }
+
+    fn set(&mut self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError> {
+        match self.definitions.get_mut(name) {
+            None => match &self.parent {
+                None => logic_error!("unbound variable {}", name),
+                Some(parent) => parent.borrow_mut().set(name, value)?,
+            },
+            Some(variable) => *variable = value,
+        };
+        Ok(())
     }
 
     fn iter_local_definitions<'a>(

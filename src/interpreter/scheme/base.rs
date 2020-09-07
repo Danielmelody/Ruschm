@@ -5,8 +5,6 @@ use std::collections::HashMap;
 pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
 ) -> HashMap<String, Value<R, E>> {
     fn add<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-        _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
         arguments
@@ -18,8 +16,6 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     fn sub<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-        _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
         let mut iter = arguments.into_iter();
@@ -43,8 +39,6 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     fn mul<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-        _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
         let mut iter = arguments.into_iter();
@@ -55,8 +49,6 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     fn div<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-        _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
         let mut iter = arguments.into_iter();
@@ -84,9 +76,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     macro_rules! comparision {
         ($name:tt, $operator:tt) => {
             fn $name<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-                 _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
-                arguments: impl IntoIterator<Item = Value<R, E>>
+                         arguments: impl IntoIterator<Item = Value<R, E>>
             ) -> Result<Value<R, E>> {
                 let mut iter = arguments.into_iter();
                 match iter.next() {
@@ -121,9 +111,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     macro_rules! first_of_order {
         ($name:tt, $cmp:tt) => {
             fn $name<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-                 _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
-                arguments: impl IntoIterator<Item = Value<R, E>>
+                         arguments: impl IntoIterator<Item = Value<R, E>>
             ) -> Result<Value<R, E>> {
                 let mut iter = arguments.into_iter();
                 match iter.next() {
@@ -149,8 +137,6 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     first_of_order!(min, <);
 
     fn sqrt<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-        _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
         match arguments.into_iter().next() {
@@ -167,8 +153,6 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     fn vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-        _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
         let vector: Vec<Value<R, E>> = arguments.into_iter().collect();
@@ -176,8 +160,6 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     fn display<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-        _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
         Ok(match arguments.into_iter().next() {
@@ -190,8 +172,6 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     fn newline<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-        _: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
         Ok(match arguments.into_iter().next() {
@@ -207,7 +187,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         ($ident:tt, $parameter_length:expr, $function:tt) => {
             (
                 $ident.to_string(),
-                Value::Procedure(Procedure::new_buildin(BuildinProcedure {
+                Value::Procedure(Procedure::Buildin(BuildinProcedure {
                     name: $ident,
                     parameter_length: $parameter_length,
                     pointer: $function,
@@ -243,12 +223,12 @@ fn buildin_parameters_length() -> Result<()> {
     let buildin_functions = base_library::<f32, StandardEnv<_>>();
     assert!(matches!(
         &buildin_functions["sqrt"],
-        Value::Procedure(Procedure{body: ProcedureBody::Buildin(sqrt), ..}) if sqrt.parameter_length == Some(1)));
+        Value::Procedure(Procedure::Buildin(sqrt)) if sqrt.parameter_length == Some(1)));
     assert!(matches!(
         &buildin_functions["display"],
-        Value::Procedure(Procedure{body: ProcedureBody::Buildin(sqrt), ..}) if sqrt.parameter_length == Some(1)));
+        Value::Procedure(Procedure::Buildin(display)) if display.parameter_length == Some(1)));
     assert!(matches!(
         &buildin_functions["newline"],
-        Value::Procedure(Procedure{body: ProcedureBody::Buildin(sqrt), ..}) if sqrt.parameter_length == Some(0)));
+        Value::Procedure(Procedure::Buildin(newline)) if newline.parameter_length == Some(0)));
     Ok(())
 }

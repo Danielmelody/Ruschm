@@ -8,12 +8,6 @@ use std::iter::{FromIterator, Iterator, Peekable};
 type Result<T> = std::result::Result<T, SchemeError>;
 pub type ParseResult = Result<Option<Statement>>;
 
-macro_rules! syntax_error {
-    ($($arg:tt)*) => (
-        return Err(SchemeError {category: ErrorType::Syntax, message: format!($($arg)*) });
-    )
-}
-
 macro_rules! expr_to_statement {
     ($expr:expr) => {
         Some(Statement::Expression($expr))
@@ -96,6 +90,7 @@ pub enum Expression {
     Character(char),
     String(String),
     Vector(Vec<Expression>),
+    Assignment(String, Box<Expression>),
     Procedure(SchemeProcedure),
     ProcedureCall(Box<Expression>, Vec<Expression>),
     Conditional(Box<(Expression, Expression, Option<Expression>)>),
@@ -111,6 +106,7 @@ impl fmt::Display for Expression {
             Expression::Real(n) => write!(f, "{:?}", n),
             Expression::Rational(a, b) => write!(f, "{}/{}", a, b),
             Expression::Vector(vector) => write!(f, "({})", join_displayable(vector)),
+            Expression::Assignment(name, value) => write!(f, "(set! {} {})", name, value),
             Expression::Procedure(p) => write!(f, "{}", p),
             Expression::ProcedureCall(op, args) => write!(f, "({} {})", op, join_displayable(args)),
             Expression::Conditional(cond) => {
@@ -188,6 +184,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                     Some(Token::Identifier(ident)) => match ident.as_str() {
                         "lambda" => Ok(expr_to_statement!(self.lambda()?)),
                         "define" => Ok(def_to_statement!(self.definition()?)),
+                        "set!" => Ok(expr_to_statement!(self.assginment()?)),
                         "import" => Ok(Some(self.import_declaration()?)),
                         "if" => Ok(expr_to_statement!(self.condition()?)),
                         _ => Ok(expr_to_statement!(self.procedure_call()?)),
@@ -418,6 +415,27 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
         }
     }
 
+    fn assginment(&mut self) -> Result<Expression> {
+        let current = self.advance(2).take();
+        match current {
+            Some(Token::Identifier(identifier)) => match (self.parse()?, self.advance(1)) {
+                (Some(Statement::Expression(expr)), Some(Token::RightParen)) => {
+                    Ok(Expression::Assignment(identifier, Box::new(expr)))
+                }
+                _ => syntax_error!("define: expect identifier and expression"),
+            },
+            Some(Token::LeftParen) => match self.advance(1).take() {
+                Some(Token::Identifier(identifier)) => {
+                    let formals = self.collect(Self::get_identifier)?;
+                    let body = Box::new(self.procedure_body(formals)?);
+                    Ok(Expression::Assignment(identifier, body))
+                }
+                _ => syntax_error!("set!: expect identifier and expression"),
+            },
+            _ => syntax_error!("set!: expect identifier and expression"),
+        }
+    }
+
     fn procedure_call(&mut self) -> Result<Expression> {
         match self.parse()? {
             Some(Statement::Expression(operator)) => {
@@ -449,6 +467,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     }
 }
 
+#[cfg(test)]
 pub fn simple_procedure(formals: Vec<String>, expression: Expression) -> Expression {
     Expression::Procedure(SchemeProcedure(formals, vec![], vec![expression]))
 }

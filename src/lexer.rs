@@ -6,12 +6,6 @@ use std::iter::Peekable;
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
-macro_rules! invalid_token {
-    ($($arg:tt)*) => (
-        return Err(SchemeError {category: ErrorType::Lexical, message: format!($($arg)*) });
-    )
-}
-
 #[derive(PartialEq, Debug, Clone)]
 pub enum Token {
     Identifier(String),
