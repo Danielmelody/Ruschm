@@ -319,7 +319,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     ) -> Result<Value<R, E>> {
         let mut _local_env = None;
         let closure_ref = if is_tail {
-            *closure.borrow_mut() = E::new();
+            closure.borrow_mut().clear_definition();
             &closure
         } else {
             _local_env = Some(Rc::new(RefCell::new(E::new_child(closure.clone()))));
