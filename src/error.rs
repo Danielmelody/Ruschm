@@ -27,3 +27,21 @@ impl fmt::Display for SchemeError {
         }
     }
 }
+
+macro_rules! invalid_token {
+    ($($arg:tt)*) => (
+        return Err(SchemeError {category: ErrorType::Lexical, message: format!($($arg)*) });
+    )
+}
+
+macro_rules! syntax_error {
+    ($($arg:tt)*) => (
+        return Err(SchemeError {category: ErrorType::Syntax, message: format!($($arg)*) });
+    )
+}
+
+macro_rules! logic_error {
+    ($($arg:tt)*) => (
+        return Err(SchemeError {category: ErrorType::Logic , message: format!($($arg)*) });
+    )
+}

@@ -14,12 +14,6 @@ use std::rc::Rc;
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
-macro_rules! logic_error {
-    ($($arg:tt)*) => (
-        return Err(SchemeError {category: ErrorType::Logic , message: format!($($arg)*) });
-    )
-}
-
 pub mod scheme;
 
 pub trait RealNumberInternalTrait: fmt::Display + fmt::Debug + Real
@@ -183,7 +177,7 @@ pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
 pub struct BuildinProcedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub name: &'static str,
     pub parameter_length: Option<usize>,
-    pub pointer: fn(Rc<RefCell<E>>, Option<Rc<RefCell<E>>>, ArgVec<R, E>) -> Result<Value<R, E>>,
+    pub pointer: fn(ArgVec<R, E>) -> Result<Value<R, E>>,
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for BuildinProcedure<R, E> {
@@ -206,56 +200,31 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for BuildinProced
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ProcedureBody<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    User(SchemeProcedure),
+pub enum Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    User(SchemeProcedure, Rc<RefCell<E>>),
     Buildin(BuildinProcedure<R, E>),
 }
 
-#[derive(Debug, Clone)]
-pub struct Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    body: ProcedureBody<R, E>,
-    closure: Option<Rc<RefCell<E>>>,
-}
-
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for Procedure<R, E> {
-    fn eq(&self, other: &Self) -> bool {
-        self.body == other.body
-    }
-}
+// impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for Procedure<R, E> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.body == other.body
+//     }
+// }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
     pub fn get_parameter_length(&self) -> Option<usize> {
-        match &self.body {
-            ProcedureBody::User(user) => Some(user.0.len()),
-            ProcedureBody::Buildin(buildin) => buildin.parameter_length,
+        match &self {
+            Procedure::User(user, ..) => Some(user.0.len()),
+            Procedure::Buildin(buildin) => buildin.parameter_length,
         }
-    }
-
-    pub fn new_buildin(body: BuildinProcedure<R, E>) -> Procedure<R, E> {
-        Procedure {
-            body: ProcedureBody::Buildin(body),
-            closure: None,
-        }
-    }
-
-    pub fn new_user(body: SchemeProcedure) -> Procedure<R, E> {
-        Procedure {
-            body: ProcedureBody::User(body),
-            closure: None,
-        }
-    }
-
-    pub fn capture(&mut self, environment: Rc<RefCell<E>>) -> &Self {
-        self.closure = Some(environment);
-        self
     }
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Procedure<R, E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.body {
-            ProcedureBody::User(procedure) => write!(f, "{}", procedure),
-            ProcedureBody::Buildin(fp) => write!(f, "{}", fp),
+        match &self {
+            Procedure::User(procedure, ..) => write!(f, "{}", procedure),
+            Procedure::Buildin(fp) => write!(f, "{}", fp),
         }
     }
 }
@@ -319,25 +288,23 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         formals: &Vec<String>,
         internal_definitions: &Vec<Definition>,
         expressions: &Vec<Expression>,
+        closure: Rc<RefCell<E>>,
         args: ArgVec<R, E>,
-        parent_env: Rc<RefCell<E>>,
-        _: Option<Rc<RefCell<E>>>,
     ) -> Result<Value<R, E>> {
-        let child_env = Rc::new(RefCell::new(E::new_child(parent_env.clone())));
+        let local_env = Rc::new(RefCell::new(E::new_child(closure.clone())));
         for (param, arg) in formals.iter().zip(args.into_iter()) {
-            child_env.borrow_mut().define(param.clone(), arg);
+            local_env.borrow_mut().define(param.clone(), arg);
         }
         for Definition(name, expr) in internal_definitions {
-            child_env
-                .borrow_mut()
-                .define(name.clone(), Self::eval_expression(&expr, &child_env)?)
+            let value = Self::eval_expression(&expr, &local_env)?;
+            local_env.borrow_mut().define(name.clone(), value)
         }
         match expressions.split_last() {
             Some((last, before_last)) => {
                 for expr in before_last {
-                    Self::eval_expression(expr, &child_env)?;
+                    Self::eval_expression(expr, &local_env)?;
                 }
-                Self::eval_expression(last, &child_env)
+                Self::eval_expression(last, &local_env)
             }
             None => logic_error!("no expression in function body"),
         }
@@ -350,20 +317,16 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn apply_procedure<'a>(
         procedure: &Procedure<R, E>,
         evaluated_args: ArgVec<R, E>,
-        env: &Rc<RefCell<E>>,
     ) -> Result<Value<R, E>> {
-        Ok(match &procedure.body {
-            ProcedureBody::Buildin(BuildinProcedure { pointer, .. }) => {
-                pointer(env.clone(), procedure.closure.clone(), evaluated_args)?
-            }
-            ProcedureBody::User(SchemeProcedure(formals, definitions, expressions)) => {
+        Ok(match &procedure {
+            Procedure::Buildin(BuildinProcedure { pointer, .. }) => pointer(evaluated_args)?,
+            Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
                 Self::apply_scheme_procedure(
                     &formals,
                     &definitions,
                     &expressions,
+                    closure.clone(),
                     evaluated_args,
-                    env.clone(),
-                    procedure.closure.clone(),
                 )?
             }
         })
@@ -379,7 +342,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                     .collect();
                 match first {
                     Value::Procedure(procedure) => {
-                        Self::apply_procedure(&procedure, evaluated_args?, env)?
+                        Self::apply_procedure(&procedure, evaluated_args?)?
                     }
                     _ => logic_error!("expect a procedure here"),
                 }
@@ -393,7 +356,14 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             }
             Expression::Character(c) => Value::Character(*c),
             Expression::String(string) => Value::String(string.clone()),
-            Expression::Procedure(scheme) => Value::Procedure(Procedure::new_user(scheme.clone())),
+            Expression::Assignment(name, value_expr) => {
+                let value = Self::eval_expression(value_expr, env)?;
+                env.borrow_mut().set(name, value)?;
+                Value::Void
+            }
+            Expression::Procedure(scheme) => {
+                Value::Procedure(Procedure::User(scheme.clone(), env.clone()))
+            }
             Expression::Conditional(cond) => {
                 let &(test, consequent, alternative) = &cond.as_ref();
                 match Self::eval_expression(&test, env)? {
@@ -624,6 +594,24 @@ fn variable_definition() -> Result<()> {
 }
 
 #[test]
+fn variable_assignment() -> Result<()> {
+    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let program = vec![
+        Statement::Definition(Definition("a".to_string(), Expression::Integer(1))),
+        Statement::Expression(Expression::Assignment(
+            "a".to_string(),
+            Box::new(Expression::Integer(2)),
+        )),
+        Statement::Expression(Expression::Identifier("a".to_string())),
+    ];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(Value::Number(Number::Integer(2)))
+    );
+    Ok(())
+}
+
+#[test]
 fn buildin_procedural() -> Result<()> {
     let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
     let program = vec![
@@ -698,6 +686,56 @@ fn lambda_call() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn closure() -> Result<()> {
+    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let program = vec![
+        Statement::Definition(Definition(
+            "counter-creator".to_string(),
+            Expression::Procedure(SchemeProcedure(
+                vec![],
+                vec![Definition("current".to_string(), Expression::Integer(0))],
+                vec![Expression::Procedure(SchemeProcedure(
+                    vec![],
+                    vec![],
+                    vec![
+                        Expression::Assignment(
+                            "current".to_string(),
+                            Box::new(Expression::ProcedureCall(
+                                Box::new(Expression::Identifier("+".to_string())),
+                                vec![
+                                    Expression::Identifier("current".to_string()),
+                                    Expression::Integer(1),
+                                ],
+                            )),
+                        ),
+                        Expression::Identifier("current".to_string()),
+                    ],
+                ))],
+            )),
+        )),
+        Statement::Definition(Definition(
+            "counter".to_string(),
+            Expression::ProcedureCall(
+                Box::new(Expression::Identifier("counter-creator".to_string())),
+                vec![],
+            ),
+        )),
+        Statement::Expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("counter".to_string())),
+            vec![],
+        )),
+        Statement::Expression(Expression::ProcedureCall(
+            Box::new(Expression::Identifier("counter".to_string())),
+            vec![],
+        )),
+    ];
+    assert_eq!(
+        interpreter.eval_program(program.iter())?,
+        Some(Value::Number(Number::Integer(2)))
+    );
+    Ok(())
+}
 #[test]
 fn condition() -> Result<()> {
     let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();

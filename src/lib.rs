@@ -1,5 +1,6 @@
-pub mod environment;
+#[macro_use]
 pub mod error;
+pub mod environment;
 pub mod interpreter;
 pub mod lexer;
 pub mod parser;
