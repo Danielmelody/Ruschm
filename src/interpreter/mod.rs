@@ -271,6 +271,11 @@ fn check_division_by_zero(num: i32) -> Result<()> {
     }
 }
 
+enum TailExpressionResult<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    TailCall(ProcedureCall, Rc<RefCell<E>>),
+    Value(Value<R, E>),
+}
+
 pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub env: Rc<RefCell<E>>,
     _marker: PhantomData<R>,
@@ -285,13 +290,12 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     }
 
     fn apply_scheme_procedure(
-        formals: &Vec<String>,
-        internal_definitions: &Vec<Definition>,
-        expressions: &Vec<Expression>,
-        closure: Rc<RefCell<E>>,
+        formals: Vec<String>,
+        internal_definitions: Vec<Definition>,
+        mut expressions: Vec<Expression>,
+        local_env: Rc<RefCell<E>>,
         args: ArgVec<R, E>,
-    ) -> Result<Value<R, E>> {
-        let local_env = Rc::new(RefCell::new(E::new_child(closure.clone())));
+    ) -> Result<TailExpressionResult<R, E>> {
         for (param, arg) in formals.iter().zip(args.into_iter()) {
             local_env.borrow_mut().define(param.clone(), arg);
         }
@@ -299,13 +303,12 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             let value = Self::eval_expression(&expr, &local_env)?;
             local_env.borrow_mut().define(name.clone(), value)
         }
-        match expressions.split_last() {
-            Some((last, before_last)) => {
-                for expr in before_last {
-                    Self::eval_expression(expr, &local_env)?;
-                }
-                Self::eval_expression(last, &local_env)
-            }
+        let last = expressions.pop();
+        for expr in expressions {
+            Self::eval_expression(&expr, &local_env)?;
+        }
+        match last {
+            Some(last) => Ok(Self::eval_tail_expression(last, local_env)?),
             None => logic_error!("no expression in function body"),
         }
     }
@@ -314,39 +317,86 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         Self::eval_expression(&expression, &self.env)
     }
 
+    #[allow(unused_assignments)]
     pub fn apply_procedure<'a>(
-        procedure: &Procedure<R, E>,
-        evaluated_args: ArgVec<R, E>,
+        initial_procedure_call: &ProcedureCall,
+        initial_env: &Rc<RefCell<E>>,
     ) -> Result<Value<R, E>> {
-        Ok(match &procedure {
-            Procedure::Buildin(BuildinProcedure { pointer, .. }) => pointer(evaluated_args)?,
-            Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
-                Self::apply_scheme_procedure(
-                    &formals,
-                    &definitions,
-                    &expressions,
-                    closure.clone(),
-                    evaluated_args,
-                )?
+        let mut procedure_call = initial_procedure_call;
+        let mut current_procedure_call = None;
+        let mut env = initial_env;
+        let mut current_env: Option<Rc<RefCell<E>>> = None;
+        loop {
+            let first = Self::eval_expression(&procedure_call.procedure_expr, env)?;
+            let evaluated_args_result: Result<ArgVec<R, E>> = procedure_call
+                .arguments
+                .iter()
+                .map(|arg| Self::eval_expression(arg, env))
+                .collect();
+            let (procedure, evaluated_args) = match first {
+                Value::Procedure(procedure) => (procedure, evaluated_args_result?),
+                _ => logic_error!("expect a procedure here"),
+            };
+            if let Some(current_env) = &current_env {
+                current_env.borrow_mut().clear_local_definitions();
             }
+            match procedure {
+                Procedure::Buildin(BuildinProcedure { pointer, .. }) => {
+                    break pointer(evaluated_args)
+                }
+                Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
+                    let local_env = current_env
+                        .unwrap_or_else(|| Rc::new(RefCell::new(E::new_child(closure.clone()))));
+                    let apply_result = Self::apply_scheme_procedure(
+                        formals,
+                        definitions,
+                        expressions,
+                        local_env,
+                        evaluated_args,
+                    )?;
+                    match apply_result {
+                        TailExpressionResult::TailCall(tail_procedure_call, last_env) => {
+                            current_procedure_call = Some(tail_procedure_call);
+                            procedure_call = current_procedure_call.as_ref().unwrap();
+                            current_env = Some(last_env);
+                            env = current_env.as_ref().unwrap();
+                        }
+                        TailExpressionResult::Value(return_value) => {
+                            break Ok(return_value);
+                        }
+                    };
+                }
+            };
+        }
+    }
+
+    fn eval_tail_expression(
+        expression: Expression,
+        env: Rc<RefCell<E>>,
+    ) -> Result<TailExpressionResult<R, E>> {
+        Ok(match expression {
+            Expression::ProcedureCall(procedure_call) => {
+                TailExpressionResult::TailCall(procedure_call, env)
+            }
+            Expression::Conditional(cond) => {
+                let (test, consequent, alternative) = *cond;
+                match Self::eval_expression(&test, &env)? {
+                    Value::Boolean(true) => Self::eval_tail_expression(consequent, env)?,
+                    Value::Boolean(false) => match alternative {
+                        Some(alter) => Self::eval_tail_expression(alter, env)?,
+                        None => TailExpressionResult::Value(Value::Void),
+                    },
+                    _ => logic_error!("if condition should be a boolean expression"),
+                }
+            }
+            other => TailExpressionResult::Value(Self::eval_expression(&other, &env)?),
         })
     }
 
     pub fn eval_expression(expression: &Expression, env: &Rc<RefCell<E>>) -> Result<Value<R, E>> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_call) => {
-                let first = Self::eval_expression(&procedure_call.procedure_expr, env)?;
-                let evaluated_args: Result<ArgVec<R, E>> = procedure_call
-                    .arguments
-                    .iter()
-                    .map(|arg| Self::eval_expression(arg, env))
-                    .collect();
-                match first {
-                    Value::Procedure(procedure) => {
-                        Self::apply_procedure(&procedure, evaluated_args?)?
-                    }
-                    _ => logic_error!("expect a procedure here"),
-                }
+                Self::apply_procedure(procedure_call, env)?
             }
             Expression::Vector(vector) => {
                 let mut values = Vec::with_capacity(vector.len());
