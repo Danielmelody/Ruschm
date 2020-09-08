@@ -334,10 +334,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 
     pub fn eval_expression(expression: &Expression, env: &Rc<RefCell<E>>) -> Result<Value<R, E>> {
         Ok(match expression {
-            Expression::ProcedureCall(procedure_expr, arguments) => {
-                let first = Self::eval_expression(procedure_expr, env)?;
-                let evaluated_args: Result<ArgVec<R, E>> = arguments
-                    .into_iter()
+            Expression::ProcedureCall(procedure_call) => {
+                let first = Self::eval_expression(&procedure_call.procedure_expr, env)?;
+                let evaluated_args: Result<ArgVec<R, E>> = procedure_call
+                    .arguments
+                    .iter()
                     .map(|arg| Self::eval_expression(arg, env))
                     .collect();
                 match first {
@@ -452,37 +453,37 @@ fn number() -> Result<()> {
 fn arithmetic() -> Result<()> {
     let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("+".to_string())),
             vec![Expression::Integer(1), Expression::Integer(2)]
-        ))?,
+        )))?,
         Value::Number(Number::Integer(3))
     );
 
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("+".to_string())),
             vec![Expression::Integer(1), Expression::Rational(1, 2)]
-        ))?,
+        )))?,
         Value::Number(Number::Rational(3, 2))
     );
 
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("*".to_string())),
             vec![
                 Expression::Rational(1, 2),
                 Expression::Real("2.0".to_string()),
             ]
-        ))?,
+        )))?,
         Value::Number(Number::Real(1.0)),
     );
 
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("/".to_string())),
             vec![Expression::Integer(1), Expression::Integer(0)]
-        )),
+        ))),
         Err(SchemeError {
             category: ErrorType::Logic,
             message: "division by exact zero".to_string()
@@ -490,24 +491,24 @@ fn arithmetic() -> Result<()> {
     );
 
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("max".to_string())),
             vec![Expression::Integer(1), Expression::Real("1.3".to_string()),]
-        ))?,
+        )))?,
         Value::Number(Number::Real(1.3)),
     );
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("min".to_string())),
             vec![Expression::Integer(1), Expression::Real("1.3".to_string()),]
-        ))?,
+        )))?,
         Value::Number(Number::Real(1.0)),
     );
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("min".to_string())),
             vec![Expression::Identifier("+".to_string()),]
-        )),
+        ))),
         Err(SchemeError {
             category: ErrorType::Logic,
             message: "expect a number!".to_string()
@@ -515,10 +516,10 @@ fn arithmetic() -> Result<()> {
     );
 
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("max".to_string())),
             vec![Expression::Identifier("+".to_string())]
-        )),
+        ))),
         Err(SchemeError {
             category: ErrorType::Logic,
             message: "expect a number!".to_string()
@@ -526,17 +527,17 @@ fn arithmetic() -> Result<()> {
     );
 
     assert_eq!(
-        interpreter.eval_root_expression(Expression::ProcedureCall(
+        interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("sqrt".to_string())),
             vec![Expression::Integer(4)]
-        ))?,
+        )))?,
         Value::Number(Number::Real(2.0)),
     );
 
-    match interpreter.eval_root_expression(Expression::ProcedureCall(
+    match interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
         Box::new(Expression::Identifier("sqrt".to_string())),
         vec![Expression::Integer(-4)],
-    ))? {
+    )))? {
         Value::Number(Number::Real(should_be_nan)) => {
             assert!(num_traits::Float::is_nan(should_be_nan))
         }
@@ -548,14 +549,14 @@ fn arithmetic() -> Result<()> {
         .zip([false, false, true, true, true].iter())
     {
         assert_eq!(
-            interpreter.eval_root_expression(Expression::ProcedureCall(
+            interpreter.eval_root_expression(Expression::ProcedureCall(ProcedureCall::new(
                 Box::new(Expression::Identifier(cmp.to_string())),
                 vec![
                     Expression::Integer(1),
                     Expression::Rational(1, 1),
                     Expression::Real("1.0".to_string()),
                 ],
-            ))?,
+            )))?,
             Value::Boolean(*result)
         )
     }
@@ -619,13 +620,13 @@ fn buildin_procedural() -> Result<()> {
             "get-add".to_string(),
             simple_procedure(vec![], Expression::Identifier("+".to_string())),
         )),
-        Statement::Expression(Expression::ProcedureCall(
-            Box::new(Expression::ProcedureCall(
+        Statement::Expression(Expression::ProcedureCall(ProcedureCall::new(
+            Box::new(Expression::ProcedureCall(ProcedureCall::new(
                 Box::new(Expression::Identifier("get-add".to_string())),
                 vec![],
-            )),
+            ))),
             vec![Expression::Integer(1), Expression::Integer(2)],
-        )),
+        ))),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
@@ -642,19 +643,19 @@ fn procedure_definition() -> Result<()> {
             "add".to_string(),
             simple_procedure(
                 vec!["x".to_string(), "y".to_string()],
-                Expression::ProcedureCall(
+                Expression::ProcedureCall(ProcedureCall::new(
                     Box::new(Expression::Identifier("+".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("y".to_string()),
                     ],
-                ),
+                )),
             ),
         )),
-        Statement::Expression(Expression::ProcedureCall(
+        Statement::Expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("add".to_string())),
             vec![Expression::Integer(1), Expression::Integer(2)],
-        )),
+        ))),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
@@ -667,17 +668,19 @@ fn procedure_definition() -> Result<()> {
 fn lambda_call() -> Result<()> {
     let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
     let program = vec![Statement::Expression(Expression::ProcedureCall(
-        Box::new(simple_procedure(
-            vec!["x".to_string(), "y".to_string()],
-            Expression::ProcedureCall(
-                Box::new(Expression::Identifier("+".to_string())),
-                vec![
-                    Expression::Identifier("x".to_string()),
-                    Expression::Identifier("y".to_string()),
-                ],
-            ),
-        )),
-        vec![Expression::Integer(1), Expression::Integer(2)],
+        ProcedureCall::new(
+            Box::new(simple_procedure(
+                vec!["x".to_string(), "y".to_string()],
+                Expression::ProcedureCall(ProcedureCall::new(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![
+                        Expression::Identifier("x".to_string()),
+                        Expression::Identifier("y".to_string()),
+                    ],
+                )),
+            )),
+            vec![Expression::Integer(1), Expression::Integer(2)],
+        ),
     ))];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
@@ -701,13 +704,13 @@ fn closure() -> Result<()> {
                     vec![
                         Expression::Assignment(
                             "current".to_string(),
-                            Box::new(Expression::ProcedureCall(
+                            Box::new(Expression::ProcedureCall(ProcedureCall::new(
                                 Box::new(Expression::Identifier("+".to_string())),
                                 vec![
                                     Expression::Identifier("current".to_string()),
                                     Expression::Integer(1),
                                 ],
-                            )),
+                            ))),
                         ),
                         Expression::Identifier("current".to_string()),
                     ],
@@ -716,19 +719,19 @@ fn closure() -> Result<()> {
         )),
         Statement::Definition(Definition(
             "counter".to_string(),
-            Expression::ProcedureCall(
+            Expression::ProcedureCall(ProcedureCall::new(
                 Box::new(Expression::Identifier("counter-creator".to_string())),
                 vec![],
-            ),
+            )),
         )),
-        Statement::Expression(Expression::ProcedureCall(
+        Statement::Expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("counter".to_string())),
             vec![],
-        )),
-        Statement::Expression(Expression::ProcedureCall(
+        ))),
+        Statement::Expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("counter".to_string())),
             vec![],
-        )),
+        ))),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
@@ -759,20 +762,20 @@ fn local_environment() -> Result<()> {
             "adda".to_string(),
             simple_procedure(
                 vec!["x".to_string()],
-                Expression::ProcedureCall(
+                Expression::ProcedureCall(ProcedureCall::new(
                     Box::new(Expression::Identifier("+".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("a".to_string()),
                     ],
-                ),
+                )),
             ),
         )),
         Statement::Definition(Definition("a".to_string(), Expression::Integer(1))),
-        Statement::Expression(Expression::ProcedureCall(
+        Statement::Expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("adda".to_string())),
             vec![Expression::Integer(2)],
-        )),
+        ))),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
@@ -789,36 +792,36 @@ fn procedure_as_data() -> Result<()> {
             "add".to_string(),
             simple_procedure(
                 vec!["x".to_string(), "y".to_string()],
-                Expression::ProcedureCall(
+                Expression::ProcedureCall(ProcedureCall::new(
                     Box::new(Expression::Identifier("+".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("y".to_string()),
                     ],
-                ),
+                )),
             ),
         )),
         Statement::Definition(Definition(
             "apply-op".to_string(),
             simple_procedure(
                 vec!["op".to_string(), "x".to_string(), "y".to_string()],
-                Expression::ProcedureCall(
+                Expression::ProcedureCall(ProcedureCall::new(
                     Box::new(Expression::Identifier("op".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("y".to_string()),
                     ],
-                ),
+                )),
             ),
         )),
-        Statement::Expression(Expression::ProcedureCall(
+        Statement::Expression(Expression::ProcedureCall(ProcedureCall::new(
             Box::new(Expression::Identifier("apply-op".to_string())),
             vec![
                 Expression::Identifier("add".to_string()),
                 Expression::Integer(1),
                 Expression::Integer(2),
             ],
-        )),
+        ))),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
