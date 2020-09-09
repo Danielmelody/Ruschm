@@ -339,11 +339,10 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     #[allow(unused_assignments)]
     pub fn apply_procedure<'a>(
         initial_procedure: &Procedure<R, E>,
-        initial_args: ArgVec<R, E>,
+        mut args: ArgVec<R, E>,
     ) -> Result<Value<R, E>> {
         let mut procedure = initial_procedure;
         let mut current_procedure = None;
-        let mut args = initial_args;
         loop {
             match procedure {
                 Procedure::Buildin(BuildinProcedure { pointer, .. }) => break pointer(args),
