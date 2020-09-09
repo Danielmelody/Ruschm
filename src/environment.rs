@@ -4,83 +4,86 @@ use crate::interpreter::scheme;
 use crate::interpreter::Interpreter;
 use crate::interpreter::RealNumberInternalTrait;
 use crate::interpreter::Value;
-use std::cell::RefCell;
+use cell::{Ref, RefCell, RefVal};
 use std::collections::HashMap;
 use std::rc::Rc;
+
+pub type DefinitionIter<'a, R, E> = Box<dyn 'a + Iterator<Item = (&'a str, &'a Value<R, E>)>>;
 
 pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + PartialEq {
     fn new() -> Self
     where
         Self: Sized;
-    fn define(&mut self, name: String, value: Value<R, Self>)
+    fn define(&self, name: String, value: Value<R, Self>)
     where
         Self: Sized;
-    fn get(&self, name: &str) -> Option<Value<R, Self>>
+    fn get(&self, name: &str) -> Option<Ref<Value<R, Self>>>
     where
         Self: Sized;
-    fn set(&mut self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError>
+    fn set(&self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError>
     where
         Self: Sized;
-    fn new_child(parent: Rc<RefCell<Self>>) -> Self
+    fn new_child(parent: Rc<Self>) -> Self
     where
         Self: Sized;
 
-    fn iter_local_definitions<'a>(
-        &'a self,
-    ) -> Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, Self>)>>;
+    fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R, Self>>;
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StandardEnv<R: RealNumberInternalTrait> {
-    parent: Option<Rc<RefCell<StandardEnv<R>>>>,
-    definitions: HashMap<String, Value<R, StandardEnv<R>>>,
+    parent: Option<Rc<StandardEnv<R>>>,
+    definitions: RefCell<HashMap<String, Value<R, StandardEnv<R>>>>,
 }
 
 impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
-    // type DefinitionCollection = std::collections::hash_map::Iter<'a， String, Value<R, StandardEnv<R>>>;
-
     fn new() -> Self {
         Self {
             parent: None,
-            definitions: scheme::base::base_library::<R, StandardEnv<R>>(),
+            definitions: RefCell::new(scheme::base::base_library::<R, StandardEnv<R>>()),
         }
     }
-    fn new_child(parent: Rc<RefCell<StandardEnv<R>>>) -> Self {
+    fn new_child(parent: Rc<StandardEnv<R>>) -> Self {
         Self {
             parent: Some(parent),
-            definitions: HashMap::new(),
+            definitions: RefCell::new(HashMap::new()),
         }
     }
 
-    fn define(&mut self, name: String, value: Value<R, Self>) {
-        self.definitions.insert(name, value);
+    fn define(&self, name: String, value: Value<R, Self>) {
+        self.definitions.borrow_mut().insert(name, value);
     }
 
-    fn get(&self, name: &str) -> Option<Value<R, Self>> {
-        match self.definitions.get(name) {
-            None => match &self.parent {
-                None => return None,
-                Some(parent) => parent.borrow().get(name),
-            },
-            Some(value) => Some(value.clone()),
+    fn get(&self, name: &str) -> Option<Ref<Value<R, Self>>> {
+        if self.definitions.borrow().contains_key(name) {
+            Some(Ref::map(self.definitions.borrow(), |definitions| {
+                definitions.get(name).unwrap()
+            }))
+        } else {
+            match &self.parent {
+                Some(parent) => parent.get(name),
+                None => None,
+            }
         }
     }
 
-    fn set(&mut self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError> {
-        match self.definitions.get_mut(name) {
+    fn set(&self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError> {
+        match self.definitions.borrow_mut().get_mut(name) {
             None => match &self.parent {
                 None => logic_error!("unbound variable {}", name),
-                Some(parent) => parent.borrow_mut().set(name, value)?,
+                Some(parent) => parent.set(name, value)?,
             },
             Some(variable) => *variable = value,
         };
         Ok(())
     }
 
-    fn iter_local_definitions<'a>(
-        &'a self,
-    ) -> Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, Self>)>> {
-        Box::new(self.definitions.iter())
+    fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R, Self>> {
+        Ref::map_val(self.definitions.borrow(), |definitions| {
+            let iter: DefinitionIter<'b, R, Self> =
+                Box::new(definitions.iter().map(|(s, v)| (s.as_str(), v)));
+            iter
+        })
     }
 }
 
@@ -88,18 +91,17 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
 fn iter_envs() -> Result<(), SchemeError> {
     let it = Interpreter::<f32, StandardEnv<f32>>::new();
     {
-        let mut mut_env = it.env.borrow_mut();
-        mut_env.define("a".to_string(), Value::Void);
+        it.env.define("a".to_string(), Value::Void);
     }
-    let env = it.env.borrow();
+    let env = it.env;
     {
         let mut definitions = env.iter_local_definitions();
-        assert_ne!(definitions.find(|(name, _)| name.as_str() == "a"), None);
+        assert_ne!(definitions.find(|(name, _)| *name == "a"), None);
     }
 
     {
         let mut definitions = env.iter_local_definitions();
-        assert_ne!(definitions.find(|(name, _)| name.as_str() == "sqrt"), None);
+        assert_ne!(definitions.find(|(name, _)| *name == "sqrt"), None);
     }
 
     Ok(())
