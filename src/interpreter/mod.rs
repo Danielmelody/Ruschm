@@ -271,6 +271,7 @@ fn check_division_by_zero(num: i32) -> Result<()> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 enum TailExpressionResult<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     TailCall(ProcedureCall, Rc<RefCell<E>>),
     Value(Value<R, E>),
@@ -873,5 +874,88 @@ fn procedure_as_data() -> Result<()> {
         interpreter.eval_program(program.iter())?,
         Some(Value::Number(Number::Integer(3)))
     );
+    Ok(())
+}
+
+#[test]
+fn eval_tail_expression() -> Result<()> {
+    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    {
+        let expression = Expression::Integer(3);
+        assert_eq!(
+            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            TailExpressionResult::Value(Value::Number(Number::Integer(3)))
+        );
+    }
+    {
+        let expression = Expression::ProcedureCall(ProcedureCall::new(
+            Box::new(Expression::Identifier("+".to_string())),
+            vec![Expression::Integer(2), Expression::Integer(5)],
+        ));
+        assert_eq!(
+            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            TailExpressionResult::TailCall(
+                ProcedureCall::new(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![Expression::Integer(2), Expression::Integer(5)],
+                ),
+                interpreter.env.clone()
+            )
+        );
+    }
+    {
+        let expression = Expression::Conditional(Box::new((
+            Expression::Boolean(true),
+            Expression::ProcedureCall(ProcedureCall::new(
+                Box::new(Expression::Identifier("+".to_string())),
+                vec![Expression::Integer(2), Expression::Integer(5)],
+            )),
+            None,
+        )));
+        assert_eq!(
+            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            TailExpressionResult::TailCall(
+                ProcedureCall::new(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![Expression::Integer(2), Expression::Integer(5)],
+                ),
+                interpreter.env.clone()
+            )
+        );
+    }
+    {
+        let expression = Expression::Conditional(Box::new((
+            Expression::Boolean(false),
+            Expression::ProcedureCall(ProcedureCall::new(
+                Box::new(Expression::Identifier("+".to_string())),
+                vec![Expression::Integer(2), Expression::Integer(5)],
+            )),
+            Some(Expression::Integer(4)),
+        )));
+        assert_eq!(
+            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            TailExpressionResult::Value(Value::Number(Number::Integer(4)))
+        );
+    }
+    {
+        let expression = Expression::Conditional(Box::new((
+            Expression::Boolean(false),
+            Expression::Integer(4),
+            Some(Expression::ProcedureCall(ProcedureCall::new(
+                Box::new(Expression::Identifier("+".to_string())),
+                vec![Expression::Integer(2), Expression::Integer(5)],
+            ))),
+        )));
+        assert_eq!(
+            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            TailExpressionResult::TailCall(
+                ProcedureCall::new(
+                    Box::new(Expression::Identifier("+".to_string())),
+                    vec![Expression::Integer(2), Expression::Integer(5)],
+                ),
+                interpreter.env.clone()
+            )
+        );
+    }
     Ok(())
 }
