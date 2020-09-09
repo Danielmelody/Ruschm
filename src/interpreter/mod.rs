@@ -293,9 +293,10 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         formals: Vec<String>,
         internal_definitions: Vec<Definition>,
         mut expressions: Vec<Expression>,
-        local_env: Rc<RefCell<E>>,
+        closure: Rc<RefCell<E>>,
         args: ArgVec<R, E>,
     ) -> Result<TailExpressionResult<R, E>> {
+        let local_env = Rc::new(RefCell::new(E::new_child(closure.clone())));
         for (param, arg) in formals.iter().zip(args.into_iter()) {
             local_env.borrow_mut().define(param.clone(), arg);
         }
@@ -337,21 +338,16 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 Value::Procedure(procedure) => (procedure, evaluated_args_result?),
                 _ => logic_error!("expect a procedure here"),
             };
-            if let Some(current_env) = &current_env {
-                current_env.borrow_mut().clear_local_definitions();
-            }
             match procedure {
                 Procedure::Buildin(BuildinProcedure { pointer, .. }) => {
                     break pointer(evaluated_args)
                 }
                 Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
-                    let local_env = current_env
-                        .unwrap_or_else(|| Rc::new(RefCell::new(E::new_child(closure.clone()))));
                     let apply_result = Self::apply_scheme_procedure(
                         formals,
                         definitions,
                         expressions,
-                        local_env,
+                        closure,
                         evaluated_args,
                     )?;
                     match apply_result {

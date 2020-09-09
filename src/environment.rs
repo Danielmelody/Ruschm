@@ -28,8 +28,6 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     fn iter_local_definitions<'a>(
         &'a self,
     ) -> Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, Self>)>>;
-
-    fn clear_local_definitions(&mut self);
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -83,10 +81,6 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
         &'a self,
     ) -> Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, Self>)>> {
         Box::new(self.definitions.iter())
-    }
-
-    fn clear_local_definitions(&mut self) {
-        self.definitions.clear();
     }
 }
 
