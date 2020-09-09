@@ -12,7 +12,3 @@
 (newline)
 (display (sum 100))
 (newline)
-(display (sum 200))
-(newline)
-(display (sum 60000))
-(newline)

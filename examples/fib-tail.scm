@@ -1,11 +1,11 @@
-(define (fib-internal x y i j)
-    (if (< i j)
-        (fib-internal y (+ x y) (+ i 1) j)
-        x
+(define (fib-internal acc x)
+    (if (< x 2)
+        (+ acc 1)
+        (fib-internal (fib-internal acc (- x 2)) (- x 1))
     )
 )
-(define (fib z) 
-    (fib-internal 1 1 0 z))
+(define (fib x) 
+    (fib-internal 0 x))
 
 (define (fib-seq-internal i x)
     (display (fib i))
@@ -20,4 +20,4 @@
     (lambda x
         (fib-seq-internal 0 x)))
 
-(fib-seq 44)
+(fib-seq 26)
