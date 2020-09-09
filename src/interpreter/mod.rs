@@ -272,8 +272,8 @@ fn check_division_by_zero(num: i32) -> Result<()> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum TailExpressionResult<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    TailCall(Expression, Vec<Expression>, Rc<RefCell<E>>),
+enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    TailCall(&'a Expression, &'a [Expression], Rc<RefCell<E>>),
     Value(Value<R, E>),
 }
 
@@ -290,13 +290,13 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
 
-    fn apply_scheme_procedure(
-        formals: Vec<String>,
-        internal_definitions: Vec<Definition>,
-        mut expressions: Vec<Expression>,
+    fn apply_scheme_procedure<'a>(
+        formals: &[String],
+        internal_definitions: &[Definition],
+        expressions: &'a [Expression],
         closure: Rc<RefCell<E>>,
         args: ArgVec<R, E>,
-    ) -> Result<TailExpressionResult<R, E>> {
+    ) -> Result<TailExpressionResult<'a, R, E>> {
         let local_env = Rc::new(RefCell::new(E::new_child(closure.clone())));
         for (param, arg) in formals.iter().zip(args.into_iter()) {
             local_env.borrow_mut().define(param.clone(), arg);
@@ -305,12 +305,13 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             let value = Self::eval_expression(&expr, &local_env)?;
             local_env.borrow_mut().define(name.clone(), value)
         }
-        let last = expressions.pop();
-        for expr in expressions {
-            Self::eval_expression(&expr, &local_env)?;
-        }
-        match last {
-            Some(last) => Ok(Self::eval_tail_expression(last, local_env)?),
+        match expressions.split_last() {
+            Some((last, other)) => {
+                for expr in other {
+                    Self::eval_expression(&expr, &local_env)?;
+                }
+                Self::eval_tail_expression(last, local_env)
+            }
             None => logic_error!("no expression in function body"),
         }
     }
@@ -319,39 +320,39 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         Self::eval_expression(&expression, &self.env)
     }
 
+    fn eval_procedure_call(
+        procedure_expr: &Expression,
+        arguments: &[Expression],
+        env: &Rc<RefCell<E>>,
+    ) -> Result<(Procedure<R, E>, ArgVec<R, E>)> {
+        let first = Self::eval_expression(procedure_expr, env)?;
+        let evaluated_args_result: Result<ArgVec<R, E>> = arguments
+            .iter()
+            .map(|arg| Self::eval_expression(arg, env))
+            .collect();
+        Ok(match first {
+            Value::Procedure(procedure) => (procedure, evaluated_args_result?),
+            _ => logic_error!("expect a procedure here"),
+        })
+    }
+
     #[allow(unused_assignments)]
     pub fn apply_procedure<'a>(
-        initial_procedure_expr: &Expression,
-        initial_arguments: &[Expression],
-        initial_env: &Rc<RefCell<E>>,
+        initial_procedure: &Procedure<R, E>,
+        mut args: ArgVec<R, E>,
     ) -> Result<Value<R, E>> {
-        let mut procedure_expr = initial_procedure_expr;
-        let mut current_procedure_expr = None;
-        let mut arguments = initial_arguments;
-        let mut current_arguments = None;
-        let mut env = initial_env;
-        let mut current_env: Option<Rc<RefCell<E>>> = None;
+        let mut procedure = initial_procedure;
+        let mut current_procedure = None;
         loop {
-            let first = Self::eval_expression(procedure_expr, env)?;
-            let evaluated_args_result: Result<ArgVec<R, E>> = arguments
-                .iter()
-                .map(|arg| Self::eval_expression(arg, env))
-                .collect();
-            let (procedure, evaluated_args) = match first {
-                Value::Procedure(procedure) => (procedure, evaluated_args_result?),
-                _ => logic_error!("expect a procedure here"),
-            };
             match procedure {
-                Procedure::Buildin(BuildinProcedure { pointer, .. }) => {
-                    break pointer(evaluated_args)
-                }
+                Procedure::Buildin(BuildinProcedure { pointer, .. }) => break pointer(args),
                 Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
                     let apply_result = Self::apply_scheme_procedure(
                         formals,
                         definitions,
                         expressions,
-                        closure,
-                        evaluated_args,
+                        closure.clone(),
+                        args,
                     )?;
                     match apply_result {
                         TailExpressionResult::TailCall(
@@ -359,12 +360,14 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                             tail_arguments,
                             last_env,
                         ) => {
-                            current_procedure_expr = Some(tail_procedure_expr);
-                            procedure_expr = current_procedure_expr.as_ref().unwrap();
-                            current_arguments = Some(tail_arguments);
-                            arguments = current_arguments.as_ref().unwrap();
-                            current_env = Some(last_env);
-                            env = current_env.as_ref().unwrap();
+                            let (tail_procedure, tail_args) = Self::eval_procedure_call(
+                                tail_procedure_expr,
+                                tail_arguments,
+                                &last_env,
+                            )?;
+                            current_procedure = Some(tail_procedure);
+                            procedure = current_procedure.as_ref().unwrap();
+                            args = tail_args;
                         }
                         TailExpressionResult::Value(return_value) => {
                             break Ok(return_value);
@@ -375,16 +378,16 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
 
-    fn eval_tail_expression(
-        expression: Expression,
+    fn eval_tail_expression<'a>(
+        expression: &'a Expression,
         env: Rc<RefCell<E>>,
-    ) -> Result<TailExpressionResult<R, E>> {
+    ) -> Result<TailExpressionResult<'a, R, E>> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
-                TailExpressionResult::TailCall(*procedure_expr, arguments, env)
+                TailExpressionResult::TailCall(procedure_expr.as_ref(), arguments, env)
             }
             Expression::Conditional(cond) => {
-                let (test, consequent, alternative) = *cond;
+                let (test, consequent, alternative) = cond.as_ref();
                 match Self::eval_expression(&test, &env)? {
                     Value::Boolean(true) => Self::eval_tail_expression(consequent, env)?,
                     Value::Boolean(false) => match alternative {
@@ -401,7 +404,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn eval_expression(expression: &Expression, env: &Rc<RefCell<E>>) -> Result<Value<R, E>> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
-                Self::apply_procedure(procedure_expr, arguments, env)?
+                let (procedure, args) = Self::eval_procedure_call(procedure_expr, arguments, env)?;
+                Self::apply_procedure(&procedure, args)?
             }
             Expression::Vector(vector) => {
                 let mut values = Vec::with_capacity(vector.len());
@@ -889,7 +893,7 @@ fn eval_tail_expression() -> Result<()> {
     {
         let expression = Expression::Integer(3);
         assert_eq!(
-            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
             TailExpressionResult::Value(Value::Number(Number::Integer(3)))
         );
     }
@@ -899,10 +903,10 @@ fn eval_tail_expression() -> Result<()> {
             vec![Expression::Integer(2), Expression::Integer(5)],
         );
         assert_eq!(
-            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
             TailExpressionResult::TailCall(
-                Expression::Identifier("+".to_string()),
-                vec![Expression::Integer(2), Expression::Integer(5)],
+                &Expression::Identifier("+".to_string()),
+                &vec![Expression::Integer(2), Expression::Integer(5)],
                 interpreter.env.clone()
             )
         );
@@ -917,10 +921,10 @@ fn eval_tail_expression() -> Result<()> {
             None,
         )));
         assert_eq!(
-            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
             TailExpressionResult::TailCall(
-                Expression::Identifier("+".to_string()),
-                vec![Expression::Integer(2), Expression::Integer(5)],
+                &Expression::Identifier("+".to_string()),
+                &vec![Expression::Integer(2), Expression::Integer(5)],
                 interpreter.env.clone()
             )
         );
@@ -935,7 +939,7 @@ fn eval_tail_expression() -> Result<()> {
             Some(Expression::Integer(4)),
         )));
         assert_eq!(
-            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
             TailExpressionResult::Value(Value::Number(Number::Integer(4)))
         );
     }
@@ -949,10 +953,10 @@ fn eval_tail_expression() -> Result<()> {
             )),
         )));
         assert_eq!(
-            Interpreter::eval_tail_expression(expression, interpreter.env.clone())?,
+            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
             TailExpressionResult::TailCall(
-                Expression::Identifier("+".to_string()),
-                vec![Expression::Integer(2), Expression::Integer(5)],
+                &Expression::Identifier("+".to_string()),
+                &vec![Expression::Integer(2), Expression::Integer(5)],
                 interpreter.env.clone()
             )
         );
