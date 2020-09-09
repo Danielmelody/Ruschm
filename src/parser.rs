@@ -92,7 +92,7 @@ pub enum Expression {
     Vector(Vec<Expression>),
     Assignment(String, Box<Expression>),
     Procedure(SchemeProcedure),
-    ProcedureCall(ProcedureCall),
+    ProcedureCall(Box<Expression>, Vec<Expression>),
     Conditional(Box<(Expression, Expression, Option<Expression>)>),
     Datum(Box<Statement>),
 }
@@ -108,7 +108,7 @@ impl fmt::Display for Expression {
             Expression::Vector(vector) => write!(f, "({})", join_displayable(vector)),
             Expression::Assignment(name, value) => write!(f, "(set! {} {})", name, value),
             Expression::Procedure(p) => write!(f, "{}", p),
-            Expression::ProcedureCall(procedure_call) => write!(f, "{}", procedure_call),
+            Expression::ProcedureCall(op, args) => write!(f, "({} {})", op, join_displayable(args)),
             Expression::Conditional(cond) => {
                 let (test, consequent, alternative) = &cond.as_ref();
                 match alternative {
@@ -122,32 +122,6 @@ impl fmt::Display for Expression {
             Expression::Boolean(true) => write!(f, "#t"),
             Expression::Boolean(false) => write!(f, "#f"),
         }
-    }
-}
-
-#[derive(PartialEq, Debug, Clone)]
-pub struct ProcedureCall {
-    pub procedure_expr: Box<Expression>,
-    pub arguments: Vec<Expression>,
-}
-
-impl ProcedureCall {
-    pub fn new(procedure_expr: Box<Expression>, arguments: Vec<Expression>) -> Self {
-        Self {
-            procedure_expr,
-            arguments,
-        }
-    }
-}
-
-impl fmt::Display for ProcedureCall {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "({} {})",
-            &self.procedure_expr,
-            join_displayable(&self.arguments)
-        )
     }
 }
 
@@ -470,10 +444,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                     match self.lexer.peek() {
                         Some(Token::RightParen) => {
                             self.advance(1);
-                            return Ok(Expression::ProcedureCall(ProcedureCall::new(
-                                Box::new(operator),
-                                arguments,
-                            )));
+                            return Ok(Expression::ProcedureCall(Box::new(operator), arguments));
                         }
                         None => syntax_error!("Unmatched Parentheses!"),
                         _ => arguments.push(match self.parse()? {
@@ -593,14 +564,14 @@ fn procedure_call() -> Result<()> {
     let ast = parser.parse()?;
     assert_eq!(
         ast,
-        expr_to_statement!(Expression::ProcedureCall(ProcedureCall::new(
+        expr_to_statement!(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Expression::Integer(1),
                 Expression::Integer(2),
                 Expression::Integer(3),
             ]
-        )))
+        ))
     );
     Ok(())
 }
@@ -666,82 +637,13 @@ fn definition() -> Result<()> {
                     "add".to_string(),
                     simple_procedure(
                         vec!["x".to_string(), "y".to_string()],
-                        Expression::ProcedureCall(ProcedureCall::new(
+                        Expression::ProcedureCall(
                             Box::new(Expression::Identifier("+".to_string())),
                             vec![
                                 Expression::Identifier("x".to_string()),
                                 Expression::Identifier("y".to_string()),
                             ]
-                        ))
-                    )
-                ))
-            )
-        }
-        {
-            let tokens = vec![
-                Token::LeftParen,
-                Token::Identifier("define".to_string()),
-                Token::LeftParen,
-                Token::Identifier("sum".to_string()),
-                Token::Identifier("x".to_string()),
-                Token::RightParen,
-                Token::LeftParen,
-                Token::Identifier("if".to_string()),
-                Token::LeftParen,
-                Token::Identifier("<".to_string()),
-                Token::Identifier("x".to_string()),
-                Token::Integer(2),
-                Token::RightParen,
-                Token::Integer(1),
-                Token::LeftParen,
-                Token::Identifier("+".to_string()),
-                Token::Identifier("x".to_string()),
-                Token::LeftParen,
-                Token::Identifier("sum".to_string()),
-                Token::LeftParen,
-                Token::Identifier("-".to_string()),
-                Token::Identifier("x".to_string()),
-                Token::Integer(1),
-                Token::RightParen,
-                Token::RightParen,
-                Token::RightParen,
-                Token::RightParen,
-                Token::RightParen,
-            ];
-            let mut parser = Parser::new(tokens.into_iter());
-            let ast = parser.parse()?;
-            assert_eq!(
-                ast,
-                def_to_statement!(Definition(
-                    "sum".to_string(),
-                    simple_procedure(
-                        vec!["x".to_string()],
-                        Expression::Conditional(Box::new((
-                            Expression::ProcedureCall(ProcedureCall::new(
-                                Box::new(Expression::Identifier("<".to_string())),
-                                vec![
-                                    Expression::Identifier("x".to_string()),
-                                    Expression::Integer(2)
-                                ]
-                            )),
-                            Expression::Integer(1),
-                            Some(Expression::ProcedureCall(ProcedureCall::new(
-                                Box::new(Expression::Identifier("+".to_string())),
-                                vec![
-                                    Expression::Identifier("x".to_string()),
-                                    Expression::ProcedureCall(ProcedureCall::new(
-                                        Box::new(Expression::Identifier("sum".to_string())),
-                                        vec![Expression::ProcedureCall(ProcedureCall::new(
-                                            Box::new(Expression::Identifier("-".to_string())),
-                                            vec![
-                                                Expression::Identifier("x".to_string()),
-                                                Expression::Integer(1)
-                                            ]
-                                        ))]
-                                    ))
-                                ]
-                            )))
-                        )))
+                        )
                     )
                 ))
             )
@@ -767,16 +669,16 @@ fn nested_procedure_call() -> Result<()> {
     let ast = parser.parse()?;
     assert_eq!(
         ast,
-        expr_to_statement!(Expression::ProcedureCall(ProcedureCall::new(
+        expr_to_statement!(Expression::ProcedureCall(
             Box::new(Expression::Identifier("+".to_string())),
             vec![
                 Expression::Integer(1),
-                Expression::ProcedureCall(ProcedureCall::new(
+                Expression::ProcedureCall(
                     Box::new(Expression::Identifier("-".to_string())),
                     vec![Expression::Integer(2), Expression::Integer(3)]
-                )),
+                ),
             ]
-        )))
+        ))
     );
     Ok(())
 }
@@ -804,13 +706,13 @@ fn lambda() -> Result<()> {
             ast,
             Some(Statement::Expression(simple_procedure(
                 vec!["x".to_string(), "y".to_string()],
-                Expression::ProcedureCall(ProcedureCall::new(
+                Expression::ProcedureCall(
                     Box::new(Expression::Identifier("+".to_string())),
                     vec![
                         Expression::Identifier("x".to_string()),
                         Expression::Identifier("y".to_string())
                     ]
-                ))
+                )
             )))
         );
     }
@@ -842,13 +744,13 @@ fn lambda() -> Result<()> {
                 SchemeProcedure(
                     vec!["x".to_string()],
                     vec![Definition("y".to_string(), Expression::Integer(1))],
-                    vec![Expression::ProcedureCall(ProcedureCall::new(
+                    vec![Expression::ProcedureCall(
                         Box::new(Expression::Identifier("+".to_string())),
                         vec![
                             Expression::Identifier("x".to_string()),
                             Expression::Identifier("y".to_string())
                         ]
-                    ))]
+                    )]
                 )
             )))
         );
