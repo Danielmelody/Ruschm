@@ -185,7 +185,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuildinProcedurePointer<R, 
     pub fn eval(&self, args: ArgVec<R, E>) -> Result<Value<R, E>> {
         match &self {
             Self::Pure(pointer) => pointer(args),
-            Self::Impure(pointer, closure) => pointer(args, closure.clone()),
+            Self::Impure(pointer, env) => pointer(args, env.clone()),
         }
     }
 }
