@@ -173,11 +173,24 @@ impl<R: RealNumberInternalTrait> std::ops::Div<Number<R>> for Number<R> {
 
 pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
+pub enum BuildinProcedurePointer<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    Pure(fn(ArgVec<R, E>) -> Result<Value<R, E>>),
+    Impure(fn(ArgVec<R, E>, Rc<RefCell<E>>) -> Result<Value<R, E>>),
+}
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuildinProcedurePointer<R, E> {
+    pub fn apply(&self, args: ArgVec<R, E>, env: &Rc<RefCell<E>>) -> Result<Value<R, E>> {
+        match &self {
+            Self::Pure(pointer) => pointer(args),
+            Self::Impure(pointer) => pointer(args, env.clone()),
+        }
+    }
+}
+#[derive(Clone, PartialEq)]
 pub struct BuildinProcedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub name: &'static str,
     pub parameter_length: Option<usize>,
-    pub pointer: fn(ArgVec<R, E>) -> Result<Value<R, E>>,
+    pub pointer: BuildinProcedurePointer<R, E>,
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for BuildinProcedure<R, E> {
@@ -188,14 +201,6 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for BuildinPro
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Debug for BuildinProcedure<R, E> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self)
-    }
-}
-
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for BuildinProcedure<R, E> {
-    fn eq(&self, rhs: &Self) -> bool {
-        self.name == rhs.name
-            && self.parameter_length == rhs.parameter_length
-            && self.pointer as usize == rhs.pointer as usize
     }
 }
 
@@ -212,6 +217,28 @@ pub enum Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
 // }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
+    pub fn new_buildin_pure(
+        name: &'static str,
+        parameter_length: Option<usize>,
+        pointer: fn(ArgVec<R, E>) -> Result<Value<R, E>>,
+    ) -> Self {
+        Self::Buildin(BuildinProcedure {
+            name,
+            parameter_length,
+            pointer: BuildinProcedurePointer::Pure(pointer),
+        })
+    }
+    pub fn new_buildin_impure(
+        name: &'static str,
+        parameter_length: Option<usize>,
+        pointer: fn(ArgVec<R, E>, Rc<RefCell<E>>) -> Result<Value<R, E>>,
+    ) -> Self {
+        Self::Buildin(BuildinProcedure {
+            name,
+            parameter_length,
+            pointer: BuildinProcedurePointer::Impure(pointer),
+        })
+    }
     pub fn get_parameter_length(&self) -> Option<usize> {
         match &self {
             Procedure::User(user, ..) => Some(user.0.len()),
@@ -340,12 +367,15 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn apply_procedure<'a>(
         initial_procedure: &Procedure<R, E>,
         mut args: ArgVec<R, E>,
+        env: &Rc<RefCell<E>>,
     ) -> Result<Value<R, E>> {
         let mut procedure = initial_procedure;
         let mut current_procedure = None;
         loop {
             match procedure {
-                Procedure::Buildin(BuildinProcedure { pointer, .. }) => break pointer(args),
+                Procedure::Buildin(BuildinProcedure { pointer, .. }) => {
+                    break pointer.apply(args, env)
+                }
                 Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
                     let apply_result = Self::apply_scheme_procedure(
                         formals,
@@ -405,7 +435,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
                 let (procedure, args) = Self::eval_procedure_call(procedure_expr, arguments, env)?;
-                Self::apply_procedure(&procedure, args)?
+                Self::apply_procedure(&procedure, args, env)?
             }
             Expression::Vector(vector) => {
                 let mut values = Vec::with_capacity(vector.len());
