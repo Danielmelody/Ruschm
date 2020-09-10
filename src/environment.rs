@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + PartialEq {
-    fn new() -> Self
+    fn new() -> Rc<RefCell<Self>>
     where
         Self: Sized;
     fn define(&mut self, name: String, value: Value<R, Self>)
@@ -39,11 +39,11 @@ pub struct StandardEnv<R: RealNumberInternalTrait> {
 impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
     // type DefinitionCollection = std::collections::hash_map::Iter<'a， String, Value<R, StandardEnv<R>>>;
 
-    fn new() -> Self {
-        Self {
+    fn new() -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self {
             parent: None,
             definitions: scheme::base::base_library::<R, StandardEnv<R>>(),
-        }
+        }))
     }
     fn new_child(parent: Rc<RefCell<StandardEnv<R>>>) -> Self {
         Self {
