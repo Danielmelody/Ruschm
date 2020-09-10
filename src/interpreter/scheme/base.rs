@@ -152,6 +152,26 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         }
     }
 
+    fn floor<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+        arguments: impl IntoIterator<Item = Value<R, E>>,
+    ) -> Result<Value<R, E>> {
+        match arguments.into_iter().next() {
+            Some(Value::Number(number)) => Ok(Value::Number(match number {
+                Number::Integer(num) => Number::Integer(num),
+                Number::Real(num) => Number::Integer(num.floor().to_i32().unwrap()),
+                Number::Rational(a, _) => {
+                    if a >= 0 {
+                        Number::Integer(a)
+                    } else {
+                        Number::Integer(a - 1)
+                    }
+                }
+            })),
+            Some(other) => logic_error!("floor requires a number, got {:?}", other),
+            _ => logic_error!("floor takes exactly one argument"),
+        }
+    }
+
     fn vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
         arguments: impl IntoIterator<Item = Value<R, E>>,
     ) -> Result<Value<R, E>> {
@@ -209,6 +229,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         function_mapping!("min", None, min),
         function_mapping!("max", None, max),
         function_mapping!("sqrt", Some(1), sqrt),
+        function_mapping!("floor", Some(1), floor),
         function_mapping!("display", Some(1), display),
         function_mapping!("newline", Some(0), newline),
         function_mapping!("vector", None, vector),
