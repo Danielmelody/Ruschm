@@ -176,16 +176,13 @@ pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
 #[derive(Clone, PartialEq)]
 pub enum BuildinProcedurePointer<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Pure(fn(ArgVec<R, E>) -> Result<Value<R, E>>),
-    Impure(
-        fn(ArgVec<R, E>, Rc<RefCell<E>>) -> Result<Value<R, E>>,
-        Rc<RefCell<E>>,
-    ),
+    Impure(fn(ArgVec<R, E>, Rc<RefCell<E>>) -> Result<Value<R, E>>),
 }
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuildinProcedurePointer<R, E> {
-    pub fn eval(&self, args: ArgVec<R, E>) -> Result<Value<R, E>> {
+    pub fn apply(&self, args: ArgVec<R, E>, env: &Rc<RefCell<E>>) -> Result<Value<R, E>> {
         match &self {
             Self::Pure(pointer) => pointer(args),
-            Self::Impure(pointer, env) => pointer(args, env.clone()),
+            Self::Impure(pointer) => pointer(args, env.clone()),
         }
     }
 }
@@ -235,12 +232,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
         name: &'static str,
         parameter_length: Option<usize>,
         pointer: fn(ArgVec<R, E>, Rc<RefCell<E>>) -> Result<Value<R, E>>,
-        closure: Rc<RefCell<E>>,
     ) -> Self {
         Self::Buildin(BuildinProcedure {
             name,
             parameter_length,
-            pointer: BuildinProcedurePointer::Impure(pointer, closure),
+            pointer: BuildinProcedurePointer::Impure(pointer),
         })
     }
     pub fn get_parameter_length(&self) -> Option<usize> {
@@ -316,7 +312,7 @@ pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn new() -> Self {
         Self {
-            env: E::new(),
+            env: Rc::new(RefCell::new(E::new())),
             _marker: PhantomData,
         }
     }
@@ -371,12 +367,15 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn apply_procedure<'a>(
         initial_procedure: &Procedure<R, E>,
         mut args: ArgVec<R, E>,
+        env: &Rc<RefCell<E>>,
     ) -> Result<Value<R, E>> {
         let mut procedure = initial_procedure;
         let mut current_procedure = None;
         loop {
             match procedure {
-                Procedure::Buildin(BuildinProcedure { pointer, .. }) => break pointer.eval(args),
+                Procedure::Buildin(BuildinProcedure { pointer, .. }) => {
+                    break pointer.apply(args, env)
+                }
                 Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
                     let apply_result = Self::apply_scheme_procedure(
                         formals,
@@ -436,7 +435,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         Ok(match expression {
             Expression::ProcedureCall(procedure_expr, arguments) => {
                 let (procedure, args) = Self::eval_procedure_call(procedure_expr, arguments, env)?;
-                Self::apply_procedure(&procedure, args)?
+                Self::apply_procedure(&procedure, args, env)?
             }
             Expression::Vector(vector) => {
                 let mut values = Vec::with_capacity(vector.len());
