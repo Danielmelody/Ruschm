@@ -53,7 +53,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     ) -> Result<Value<R, E>> {
         let mut iter = arguments.into_iter();
         let init = match iter.next() {
-            None => logic_error!("'-' needs at least one argument"),
+            None => logic_error!("'/' needs at least one argument"),
             Some(first) => match first {
                 Value::Number(first_num) => match iter.next() {
                     Some(second) => match second {
