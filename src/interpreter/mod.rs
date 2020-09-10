@@ -172,6 +172,176 @@ impl<R: RealNumberInternalTrait> std::ops::Div<Number<R>> for Number<R> {
     }
 }
 
+impl<R: RealNumberInternalTrait> Number<R> {
+    pub fn sqrt(self) -> Self {
+        match self {
+            Number::Integer(num) => Number::Real(R::from(num).unwrap().sqrt()),
+            Number::Real(num) => Number::Real(num.sqrt()),
+            Number::Rational(a, b) => {
+                Number::Real(R::from(a).unwrap() / R::from(b).unwrap().sqrt())
+            }
+        }
+    }
+    pub fn floor(self) -> Self {
+        match self {
+            Number::Integer(num) => Number::Integer(num),
+            Number::Real(num) => Number::Real(num.floor()),
+            Number::Rational(a, b) => Number::Integer({
+                let quot = a / b;
+                if quot >= 0 || quot * b == a {
+                    quot
+                } else {
+                    quot - 1
+                }
+            }),
+        }
+    }
+
+    pub fn floor_quotient(self, rhs: Self) -> Result<Self> {
+        Ok((self / rhs)?.floor())
+    }
+
+    pub fn floor_remainder(self, rhs: Self) -> Result<Self> {
+        Ok(self - self.floor_quotient(rhs)? * rhs)
+    }
+
+    // Return an exact number that is numerically closest to the given number
+    pub fn exact(self) -> Result<Self> {
+        match self {
+            Number::Real(num) => match num.round().to_i32() {
+                Some(i) => Ok(Number::Integer(i)),
+                None => logic_error!("cannot be converted to an exact number"),
+            },
+            exact => Ok(exact),
+        }
+    }
+}
+#[test]
+fn number_floor() {
+    assert_eq!(Number::<f32>::Integer(5).floor(), Number::Integer(5));
+    assert_eq!(Number::<f32>::Rational(28, 3).floor(), Number::Integer(9));
+    assert_eq!(Number::<f32>::Rational(-43, 7).floor(), Number::Integer(-7));
+    assert_eq!(Number::<f32>::Rational(43, -7).floor(), Number::Integer(-7));
+    assert_eq!(Number::<f32>::Rational(-15, 5).floor(), Number::Integer(-3));
+    assert_eq!(Number::<f32>::Real(3.8).floor(), Number::Real(3.0));
+    assert_eq!(Number::<f32>::Real(-5.3).floor(), Number::Real(-6.0));
+}
+#[test]
+fn number_floor_quotient() {
+    assert_eq!(
+        Number::<f32>::Integer(5).floor_quotient(Number::Integer(2)),
+        Ok(Number::Integer(2))
+    );
+    assert_eq!(
+        Number::<f32>::Integer(-5).floor_quotient(Number::Integer(2)),
+        Ok(Number::Integer(-3))
+    );
+    assert_eq!(
+        Number::<f32>::Integer(5).floor_quotient(Number::Integer(-2)),
+        Ok(Number::Integer(-3))
+    );
+    assert_eq!(
+        Number::<f32>::Integer(-5).floor_quotient(Number::Integer(-2)),
+        Ok(Number::Integer(2))
+    );
+    assert_eq!(
+        Number::<f32>::Rational(25, 2).floor_quotient(Number::Integer(3)),
+        Ok(Number::Integer(4))
+    );
+    assert_eq!(
+        Number::<f32>::Rational(-25, 2).floor_quotient(Number::Integer(3)),
+        Ok(Number::Integer(-5))
+    );
+    assert_eq!(
+        Number::<f32>::Rational(33, 7).floor_quotient(Number::Rational(5, 2)),
+        Ok(Number::Integer(1))
+    );
+    assert_eq!(
+        Number::<f32>::Real(5.0).floor_quotient(Number::Real(2.0)),
+        Ok(Number::Real(2.0))
+    );
+    assert_eq!(
+        Number::<f32>::Integer(-5).floor_quotient(Number::Real(2.0)),
+        Ok(Number::Real(-3.0))
+    );
+    assert_eq!(
+        Number::<f32>::Real(5.0).floor_quotient(Number::Integer(-2)),
+        Ok(Number::Real(-3.0))
+    );
+    assert_eq!(
+        Number::<f32>::Rational(-15, 2).floor_quotient(Number::Real(-3.0)),
+        Ok(Number::Real(2.0))
+    );
+}
+#[test]
+fn number_floor_remainder() {
+    assert_eq!(
+        Number::<f32>::Integer(5).floor_remainder(Number::Integer(2)),
+        Ok(Number::Integer(1))
+    );
+    assert_eq!(
+        Number::<f32>::Integer(-5).floor_remainder(Number::Integer(2)),
+        Ok(Number::Integer(1))
+    );
+    assert_eq!(
+        Number::<f32>::Integer(5).floor_remainder(Number::Integer(-2)),
+        Ok(Number::Integer(-1))
+    );
+    assert_eq!(
+        Number::<f32>::Integer(-5).floor_remainder(Number::Integer(-2)),
+        Ok(Number::Integer(-1))
+    );
+    assert_eq!(
+        Number::<f32>::Rational(25, 2).floor_remainder(Number::Integer(3)),
+        Ok(Number::Rational(1, 2))
+    );
+    assert_eq!(
+        Number::<f32>::Rational(-25, 2).floor_remainder(Number::Integer(3)),
+        Ok(Number::Rational(5, 2))
+    );
+    assert_eq!(
+        Number::<f32>::Rational(33, 7).floor_remainder(Number::Rational(5, 2)),
+        Ok(Number::Rational(31, 14))
+    );
+    assert_eq!(
+        Number::<f32>::Real(5.0).floor_remainder(Number::Real(2.0)),
+        Ok(Number::Real(1.0))
+    );
+    assert_eq!(
+        Number::<f32>::Integer(-5).floor_remainder(Number::Real(2.0)),
+        Ok(Number::Real(1.0))
+    );
+    assert_eq!(
+        Number::<f32>::Real(5.0).floor_remainder(Number::Integer(-2)),
+        Ok(Number::Real(-1.0))
+    );
+    assert_eq!(
+        Number::<f32>::Rational(-15, 2).floor_remainder(Number::Real(-3.0)),
+        Ok(Number::Real(-1.5))
+    );
+}
+
+#[test]
+fn number_exact() {
+    assert_eq!(Number::<f32>::Integer(5).exact(), Ok(Number::Integer(5)));
+    assert_eq!(Number::<f32>::Real(5.3).exact(), Ok(Number::Integer(5)));
+    assert_eq!(Number::<f32>::Real(5.8).exact(), Ok(Number::Integer(6)));
+    assert_eq!(Number::<f32>::Real(-5.8).exact(), Ok(Number::Integer(-6)));
+    assert_eq!(Number::<f32>::Real(-5.3).exact(), Ok(Number::Integer(-5)));
+    assert_eq!(
+        Number::<f32>::Real(1e30).exact(),
+        Err(SchemeError {
+            location: None,
+            category: ErrorType::Logic,
+            message: "cannot be converted to an exact number".to_string()
+        })
+    );
+    assert_eq!(
+        Number::<f32>::Rational(7, 3).exact(),
+        Ok(Number::Rational(7, 3))
+    );
+}
+
 pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
 
 #[derive(Clone, PartialEq)]
