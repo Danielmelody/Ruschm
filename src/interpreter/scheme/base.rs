@@ -53,7 +53,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     ) -> Result<Value<R, E>> {
         let mut iter = arguments.into_iter();
         let init = match iter.next() {
-            None => logic_error!("'-' needs at least one argument"),
+            None => logic_error!("'/' needs at least one argument"),
             Some(first) => match first {
                 Value::Number(first_num) => match iter.next() {
                     Some(second) => match second {
@@ -187,11 +187,11 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         ($ident:tt, $parameter_length:expr, $function:tt) => {
             (
                 $ident.to_string(),
-                Value::Procedure(Procedure::Buildin(BuildinProcedure {
-                    name: $ident,
-                    parameter_length: $parameter_length,
-                    pointer: $function,
-                })),
+                Value::Procedure(Procedure::new_buildin_pure(
+                    $ident,
+                    $parameter_length,
+                    $function,
+                )),
             )
         };
     }
