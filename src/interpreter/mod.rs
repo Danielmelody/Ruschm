@@ -363,18 +363,20 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         })
     }
 
-    #[allow(unused_assignments)]
     pub fn apply_procedure<'a>(
         initial_procedure: &Procedure<R, E>,
         mut args: ArgVec<R, E>,
         env: &Rc<RefCell<E>>,
     ) -> Result<Value<R, E>> {
-        let mut procedure = initial_procedure;
         let mut current_procedure = None;
         loop {
-            match procedure {
+            match if current_procedure.is_none() {
+                initial_procedure
+            } else {
+                current_procedure.as_ref().unwrap()
+            } {
                 Procedure::Buildin(BuildinProcedure { pointer, .. }) => {
-                    break pointer.apply(args, env)
+                    break pointer.apply(args, env);
                 }
                 Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
                     let apply_result = Self::apply_scheme_procedure(
@@ -396,7 +398,6 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                                 &last_env,
                             )?;
                             current_procedure = Some(tail_procedure);
-                            procedure = current_procedure.as_ref().unwrap();
                             args = tail_args;
                         }
                         TailExpressionResult::Value(return_value) => {
