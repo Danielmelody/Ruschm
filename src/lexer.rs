@@ -422,7 +422,13 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
                                 self.digital10(&mut denominator)?;
                                 break Ok(Some(TokenData::Rational(
                                     number_literal.parse::<i32>().unwrap(),
-                                    denominator.parse::<u32>().unwrap(),
+                                    match denominator.parse::<u32>().unwrap() {
+                                        0 => invalid_token!(
+                                            Some(self.location),
+                                            "rational denominator should not be 0!"
+                                        ),
+                                        other => other,
+                                    },
                                 )));
                             }
                             _ => {
@@ -563,6 +569,22 @@ fn number() -> Result<()> {
             TokenData::Rational(-32, 3),
         ]
     );
+    assert_eq!(
+        tokenize("1/0"),
+        Err(SchemeError {
+            category: ErrorType::Lexical,
+            message: "rational denominator should not be 0!".to_string(),
+            location: Some([1, 4])
+        })
+    );
+    assert_eq!(
+        tokenize("1/00"),
+        Err(SchemeError {
+            category: ErrorType::Lexical,
+            message: "rational denominator should not be 0!".to_string(),
+            location: Some([1, 5])
+        })
+    );
     Ok(())
 }
 
@@ -589,10 +611,11 @@ fn atmosphere() -> Result<()> {
 #[test]
 fn comment() -> Result<()> {
     assert_eq!(
-        tokenize("abcd;+-12\t\n\r 12")?,
+        tokenize("abcd;+-12\n 12;dew\r34")?,
         vec![
             TokenData::Identifier(String::from("abcd")),
-            TokenData::Integer(12)
+            TokenData::Integer(12),
+            TokenData::Integer(34)
         ]
     );
     Ok(())
