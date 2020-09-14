@@ -1,5 +1,6 @@
 use crate::environment::IEnvironment;
 use crate::interpreter::*;
+use crate::parser::ParameterFormals;
 use std::collections::HashMap;
 
 pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
@@ -11,7 +12,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
             .into_iter()
             .try_fold(Value::Number(Number::Integer(0)), |a, b| match (a, b) {
                 (Value::Number(num1), Value::Number(num2)) => Ok(Value::Number(num1 + num2)),
-                _ => logic_error!("expect a number!"),
+                o => logic_error!("expect a number, got {}", o.1),
             })
     }
 
@@ -25,16 +26,16 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
                 Value::Number(first_num) => match iter.next() {
                     Some(second) => match second {
                         Value::Number(second_num) => Value::Number(first_num - second_num),
-                        _ => logic_error!("expect a number!"),
+                        o => logic_error!("expect a number, got {}", o),
                     },
                     None => Value::Number(Number::Integer(0) - first_num),
                 },
-                _ => logic_error!("expect a number!"),
+                o => logic_error!("expect a number, got {}", o),
             },
         };
         iter.try_fold(init, |a, b| match (a, b) {
             (Value::Number(num1), Value::Number(num2)) => Ok(Value::Number(num1 - num2)),
-            _ => logic_error!("expect a number!"),
+            o => logic_error!("expect a number, got {}", o.1),
         })
     }
 
@@ -44,7 +45,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         let mut iter = arguments.into_iter();
         iter.try_fold(Value::Number(Number::Integer(1)), |a, b| match (a, b) {
             (Value::Number(num1), Value::Number(num2)) => Ok(Value::Number(num1 * num2)),
-            _ => logic_error!("expect a number!"),
+            o => logic_error!("expect a number, got {}", o.1),
         })
     }
 
@@ -58,16 +59,16 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
                 Value::Number(first_num) => match iter.next() {
                     Some(second) => match second {
                         Value::Number(second_num) => Value::Number((first_num / second_num)?),
-                        _ => logic_error!("expect a number!"),
+                        o => logic_error!("expect a number, got {}", o),
                     },
                     None => Value::Number((Number::Integer(1) / first_num)?),
                 },
-                _ => logic_error!("expect a number!"),
+                o => logic_error!("expect a number, got {}", o),
             },
         };
         iter.try_fold(init, |a, b| match (a, b) {
             (Value::Number(num1), Value::Number(num2)) => Ok(Value::Number((num1 / num2)?)),
-            _ => logic_error!("expect a number!"),
+            o => logic_error!("expect a number, got {}", o.1),
         })
     }
 
@@ -124,10 +125,10 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
                                             false => upcast_oprands((num1, num2)).rhs(),
                                         }))
                                     }
-                                    _ => logic_error!("expect a number!"),
+                                    o => logic_error!("expect a number, got {}", o.1),
                                 })
                             },
-                    _ => logic_error!("expect a number!"),
+                    Some(o) => logic_error!("expect a number, got {}", o),
                     }
                 }
             }
@@ -184,37 +185,36 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     macro_rules! function_mapping {
-        ($ident:tt, $parameter_length:expr, $function:tt) => {
+        ($ident:tt, $fixed_parameter:expr, $variadic_parameter:expr, $function:tt) => {
             (
-                $ident.to_string(),
+                $ident.to_owned(),
                 Value::Procedure(Procedure::new_buildin_pure(
                     $ident,
-                    $parameter_length,
+                    ParameterFormals($fixed_parameter, $variadic_parameter),
                     $function,
                 )),
             )
         };
     }
 
-    [
-        function_mapping!("+", None, add),
-        function_mapping!("-", None, sub),
-        function_mapping!("*", None, mul),
-        function_mapping!("/", None, div),
-        function_mapping!("=", None, equals),
-        function_mapping!("<", None, less),
-        function_mapping!("<=", None, less_equal),
-        function_mapping!(">", None, greater),
-        function_mapping!(">=", None, greater_equal),
-        function_mapping!("min", None, min),
-        function_mapping!("max", None, max),
-        function_mapping!("sqrt", Some(1), sqrt),
-        function_mapping!("display", Some(1), display),
-        function_mapping!("newline", Some(0), newline),
-        function_mapping!("vector", None, vector),
+    vec![
+        function_mapping!("+", vec![], Some("x".to_string()), add),
+        function_mapping!("-", vec![], Some("x".to_string()), sub),
+        function_mapping!("*", vec![], Some("x".to_string()), mul),
+        function_mapping!("/", vec![], Some("x".to_string()), div),
+        function_mapping!("=", vec![], Some("x".to_string()), equals),
+        function_mapping!("<", vec![], Some("x".to_string()), less),
+        function_mapping!("<=", vec![], Some("x".to_string()), less_equal),
+        function_mapping!(">", vec![], Some("x".to_string()), greater),
+        function_mapping!(">=", vec![], Some("x".to_string()), greater_equal),
+        function_mapping!("min", vec![], Some("x".to_string()), min),
+        function_mapping!("max", vec![], Some("x".to_string()), max),
+        function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
+        function_mapping!("display", vec!["value".to_string()], None, display),
+        function_mapping!("newline", vec![], None, newline),
+        function_mapping!("vector", vec![], None, vector),
     ]
-    .iter()
-    .cloned()
+    .into_iter()
     .collect()
 }
 
@@ -223,12 +223,12 @@ fn buildin_parameters_length() -> Result<()> {
     let buildin_functions = base_library::<f32, StandardEnv<_>>();
     assert!(matches!(
         &buildin_functions["sqrt"],
-        Value::Procedure(Procedure::Buildin(sqrt)) if sqrt.parameter_length == Some(1)));
+        Value::Procedure(Procedure::Buildin(sqrt)) if sqrt.parameters.0.len() == 1));
     assert!(matches!(
         &buildin_functions["display"],
-        Value::Procedure(Procedure::Buildin(display)) if display.parameter_length == Some(1)));
+        Value::Procedure(Procedure::Buildin(display)) if display.parameters.0.len() == 1));
     assert!(matches!(
         &buildin_functions["newline"],
-        Value::Procedure(Procedure::Buildin(newline)) if newline.parameter_length == Some(0)));
+        Value::Procedure(Procedure::Buildin(newline)) if newline.parameters.0.len() == 0));
     Ok(())
 }
