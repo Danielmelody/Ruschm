@@ -86,6 +86,8 @@ numeric_one_argument!("sqrt", sqrt);
 
 numeric_one_argument!("floor", floor);
 
+numeric_one_argument!("ceiling", ceiling);
+
 numeric_one_argument!("exact", exact, ?);
 #[test]
 fn buildin_numeric_one() {
@@ -414,6 +416,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         function_mapping!("max", vec![], Some("x".to_string()), max),
         function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
         function_mapping!("floor", vec!["x".to_string()], None, floor),
+        function_mapping!("ceiling", vec!["x".to_string()], None, ceiling),
         function_mapping!("exact", vec!["x".to_string()], None, exact),
         function_mapping!(
             "floor-quotient",

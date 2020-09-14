@@ -197,6 +197,21 @@ impl<R: RealNumberInternalTrait> Number<R> {
         }
     }
 
+    pub fn ceiling(self) -> Self {
+        match self {
+            Number::Integer(num) => Number::Integer(num),
+            Number::Real(num) => Number::Real(num.ceil()),
+            Number::Rational(a, b) => Number::Integer({
+                let quot = a / b;
+                if quot <= 0 || quot * b == a {
+                    quot
+                } else {
+                    quot + 1
+                }
+            }),
+        }
+    }
+
     pub fn floor_quotient(self, rhs: Self) -> Result<Self> {
         Ok((self / rhs)?.floor())
     }
@@ -224,6 +239,24 @@ fn number_floor() {
     assert_eq!(Number::<f32>::Rational(-15, 5).floor(), Number::Integer(-3));
     assert_eq!(Number::<f32>::Real(3.8).floor(), Number::Real(3.0));
     assert_eq!(Number::<f32>::Real(-5.3).floor(), Number::Real(-6.0));
+}
+#[test]
+fn number_ceiling() {
+    assert_eq!(Number::<f32>::Integer(5).ceiling(), Number::Integer(5));
+    assert_eq!(
+        Number::<f32>::Rational(28, 3).ceiling(),
+        Number::Integer(10)
+    );
+    assert_eq!(
+        Number::<f32>::Rational(-43, 7).ceiling(),
+        Number::Integer(-6)
+    );
+    assert_eq!(
+        Number::<f32>::Rational(-15, 5).ceiling(),
+        Number::Integer(-3)
+    );
+    assert_eq!(Number::<f32>::Real(3.8).ceiling(), Number::Real(4.0));
+    assert_eq!(Number::<f32>::Real(-5.3).ceiling(), Number::Real(-5.0));
 }
 #[test]
 fn number_floor_quotient() {
