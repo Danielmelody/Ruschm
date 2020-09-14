@@ -3,8 +3,10 @@
         1
         (+ (fib (- x 2)) (fib (- x 1)))))
 
+        ;test
+
 (define fib-seq
-    (lambda x
+    (lambda (x)
         (if (< x 1) 1
             (fib-seq (- x 1)))
         (display (fib x))

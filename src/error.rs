@@ -5,7 +5,7 @@ use std::fmt;
 
 use fmt::Display;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ErrorType {
     Lexical,
     Syntax,
@@ -42,7 +42,7 @@ impl<T: PartialEq + Display> Display for Located<T> {
         self.data.fmt(f)
     }
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct SchemeError {
     pub category: ErrorType,
     pub message: String,
