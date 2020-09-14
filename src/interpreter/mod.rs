@@ -536,25 +536,9 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 
     pub fn eval(&self, char_stream: impl Iterator<Item = char>) -> Result<Option<Value<R, E>>> {
         {
-            let mut char_visitor = char_stream.peekable();
-            let mut last_value = None;
-            let mut last_location = None;
-            loop {
-                // println!("------last location: {:?}------", last_location);
-                let mut token_stream = TokenGenerator::from_char_stream(&mut char_visitor);
-                match last_location {
-                    Some(location) => token_stream.set_last_location(location),
-                    None => (),
-                }
-                let result: Result<ParseResult> = token_stream.collect();
-                match result?? {
-                    Some((ast, end_location)) => {
-                        last_value = self.eval_root_ast(&ast)?;
-                        last_location = end_location
-                    }
-                    None => break Ok(last_value),
-                }
-            }
+            let lexer = Lexer::from_char_stream(char_stream);
+            let mut parser = Parser::from_lexer(lexer);
+            parser.try_fold(None, |_, statement| self.eval_root_ast(&statement?))
         }
     }
 }
