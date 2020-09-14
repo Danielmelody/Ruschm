@@ -4,7 +4,7 @@ use crate::{error::*, lexer::Token};
 use fmt::Display;
 use itertools::join;
 use std::fmt;
-use std::iter::{FromIterator, Iterator, Peekable};
+use std::iter::{Iterator, Peekable};
 
 type Result<T> = std::result::Result<T, SchemeError>;
 pub type ParseResult = Result<Option<(Statement, Option<[u32; 2]>)>>;
@@ -163,20 +163,13 @@ impl fmt::Display for SchemeProcedure {
     }
 }
 
-pub struct Parser<TokenIter: Iterator<Item = Token>> {
+pub struct Parser<TokenIter: Iterator<Item = Result<Token>>> {
     pub current: Option<Token>,
     pub lexer: Peekable<TokenIter>,
     location: Option<[u32; 2]>,
 }
 
-impl FromIterator<Token> for ParseResult {
-    fn from_iter<I: IntoIterator<Item = Token>>(iter: I) -> Self {
-        let mut p = Parser::from_token_stream(iter.into_iter());
-        p.parse_root()
-    }
-}
-
-impl<TokenIter: Iterator<Item = Token>> Iterator for Parser<TokenIter> {
+impl<TokenIter: Iterator<Item = Result<Token>>> Iterator for Parser<TokenIter> {
     type Item = Result<Statement>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.parse() {
@@ -187,8 +180,8 @@ impl<TokenIter: Iterator<Item = Token>> Iterator for Parser<TokenIter> {
     }
 }
 
-impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
-    pub fn from_token_stream(lexer: TokenIter) -> Parser<TokenIter> {
+impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
+    pub fn from_lexer(lexer: TokenIter) -> Parser<TokenIter> {
         Self {
             current: None,
             lexer: lexer.peekable(),
@@ -224,7 +217,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                     location,
                 }
                 .into(),
-                TokenData::LeftParen => match self.lexer.peek() {
+                TokenData::LeftParen => match self.peek_next_token()? {
                     Some(Token {
                         data: TokenData::Identifier(ident),
                         ..
@@ -282,7 +275,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     }
 
     pub fn parse(&mut self) -> Result<Option<Statement>> {
-        self.advance(1);
+        self.advance(1)?;
         self.parse_current()
     }
 
@@ -302,9 +295,9 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
         let location = self.location;
         let pairs = [
             self.current.take(),
-            self.advance(1).take(),
-            self.advance(1).take(),
-            self.advance(1).take(),
+            self.advance(1)?.take(),
+            self.advance(1)?.take(),
+            self.advance(1)?.take(),
         ];
         let datas = pairs
             .iter()
@@ -328,14 +321,14 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     {
         let mut collection = vec![];
         loop {
-            match self.lexer.peek().map(|t| &t.data) {
+            match self.peek_next_token()?.map(|t| &t.data) {
                 Some(TokenData::RightParen) => {
-                    self.advance(1);
+                    self.advance(1)?;
                     break Ok(collection);
                 }
                 None => syntax_error!(self.location, "unexpect end of input"),
                 _ => {
-                    self.advance(1);
+                    self.advance(1)?;
                     let ele = get_element(self)?;
                     collection.push(ele);
                 }
@@ -351,9 +344,9 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     fn procedure_formals(&mut self) -> Result<ParameterFormals> {
         let mut formals = ParameterFormals::new();
         loop {
-            match self.lexer.peek().map(|t| &t.data) {
+            match self.peek_next_token()?.map(|t| &t.data) {
                 Some(TokenData::RightParen) => {
-                    self.advance(1);
+                    self.advance(1)?;
                     break Ok(formals);
                 }
                 Some(TokenData::Period) => {
@@ -363,12 +356,12 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                             "must provide at least normal parameter before variadic parameter"
                         )
                     }
-                    self.advance(2);
+                    self.advance(2)?;
                     formals.1 = Some(self.get_identifier()?);
                 }
                 None => syntax_error!(self.location, "unexpect end of input"),
                 _ => {
-                    self.advance(1);
+                    self.advance(1)?;
                     let parameter = self.get_identifier()?;
                     formals.0.push(parameter);
                 }
@@ -379,7 +372,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     fn lambda(&mut self) -> Result<Expression> {
         let location = self.location;
         let mut formals = ParameterFormals::new();
-        match self.advance(2).take().map(|t| t.data) {
+        match self.advance(2)?.take().map(|t| t.data) {
             Some(TokenData::Identifier(ident)) => formals.1 = Some(ident),
             Some(TokenData::LeftParen) => {
                 formals = self.procedure_formals()?;
@@ -421,25 +414,25 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     }
 
     fn import_declaration(&mut self) -> Result<Statement> {
-        self.advance(1);
+        self.advance(1)?;
         Ok(Statement::ImportDeclaration(
             self.collect(Self::import_set)?,
         ))
     }
 
     fn condition(&mut self) -> Result<Expression> {
-        self.advance(1);
+        self.advance(1)?;
         match (
             self.parse()?,
             self.parse()?,
-            self.lexer.peek().map(|t| &t.data),
+            self.peek_next_token()?.map(|t| &t.data),
         ) {
             (
                 Some(Statement::Expression(test)),
                 Some(Statement::Expression(consequent)),
                 Some(TokenData::RightParen),
             ) => {
-                self.advance(1);
+                self.advance(1)?;
                 Ok(Expression {
                     data: ExpressionBody::Conditional(Box::new((test, consequent, None))),
                     location: self.location,
@@ -451,7 +444,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                 Some(_),
             ) => match self.parse()? {
                 Some(Statement::Expression(alternative)) => {
-                    self.advance(1);
+                    self.advance(1)?;
                     Ok(Expression {
                         data: ExpressionBody::Conditional(Box::new((
                             test,
@@ -484,10 +477,10 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
             Some(Token {
                 data: TokenData::LeftParen,
                 location,
-            }) => match self.advance(1).take().map(|t| t.data) {
+            }) => match self.advance(1)?.take().map(|t| t.data) {
                 Some(TokenData::Identifier(ident)) => match ident.as_str() {
                     "only" => {
-                        self.advance(1);
+                        self.advance(1)?;
                         ImportSet {
                             data: ImportSetBody::Only(
                                 Box::new(self.import_set()?),
@@ -497,7 +490,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                         }
                     }
                     "except" => {
-                        self.advance(1);
+                        self.advance(1)?;
                         ImportSet {
                             data: ImportSetBody::Except(
                                 Box::new(self.import_set()?),
@@ -506,7 +499,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                             location,
                         }
                     }
-                    "prefix" => match self.advance(2).take().map(|t| t.data) {
+                    "prefix" => match self.advance(2)?.take().map(|t| t.data) {
                         Some(TokenData::Identifier(identifier)) => ImportSet {
                             data: ImportSetBody::Prefix(Box::new(self.import_set()?), identifier),
                             location,
@@ -514,7 +507,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
                         _ => syntax_error!(location, "expect a prefix name after import"),
                     },
                     "rename" => {
-                        self.advance(1);
+                        self.advance(1)?;
                         ImportSet {
                             data: ImportSetBody::Rename(
                                 Box::new(self.import_set()?),
@@ -533,24 +526,24 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
 
     fn definition(&mut self) -> Result<Definition> {
         let location = self.location;
-        let current = self.advance(2).take().map(|t| t.data);
+        let current = self.advance(2)?.take().map(|t| t.data);
         match current {
             Some(TokenData::Identifier(identifier)) => {
-                match (self.parse()?, self.advance(1).take().map(|t| t.data)) {
+                match (self.parse()?, self.advance(1)?.take().map(|t| t.data)) {
                     (Some(Statement::Expression(expr)), Some(TokenData::RightParen)) => {
                         Ok(Definition::from_data(DefinitionBody(identifier, expr)))
                     }
                     _ => syntax_error!(location, "define: expect identifier and expression"),
                 }
             }
-            Some(TokenData::LeftParen) => match self.advance(1).take().map(|t| t.data) {
+            Some(TokenData::LeftParen) => match self.advance(1)?.take().map(|t| t.data) {
                 Some(TokenData::Identifier(identifier)) => {
                     let mut formals = ParameterFormals::new();
-                    match self.lexer.peek().map(|t| &t.data) {
+                    match self.peek_next_token()?.map(|t| &t.data) {
                         Some(TokenData::Period) => {
-                            self.advance(2);
+                            self.advance(2)?;
                             formals.1 = Some(self.get_identifier()?);
-                            self.advance(1);
+                            self.advance(1)?;
                         }
                         _ => formals = self.procedure_formals()?,
                     }
@@ -565,17 +558,17 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
 
     fn assginment(&mut self) -> Result<Expression> {
         let location = self.location;
-        let current = self.advance(2).take().map(|t| t.data);
+        let current = self.advance(2)?.take().map(|t| t.data);
         match current {
             Some(TokenData::Identifier(identifier)) => {
-                match (self.parse()?, self.advance(1).take().map(|t| t.data)) {
+                match (self.parse()?, self.advance(1)?.take().map(|t| t.data)) {
                     (Some(Statement::Expression(expr)), Some(TokenData::RightParen)) => {
                         Ok(self.locate(ExpressionBody::Assignment(identifier, Box::new(expr))))
                     }
                     _ => syntax_error!(location, "define: expect identifier and expression"),
                 }
             }
-            Some(TokenData::LeftParen) => match self.advance(1).take().map(|t| t.data) {
+            Some(TokenData::LeftParen) => match self.advance(1)?.take().map(|t| t.data) {
                 Some(TokenData::Identifier(identifier)) => {
                     let formals = self.procedure_formals()?;
                     let body = Box::new(self.procedure_body(formals)?);
@@ -592,9 +585,9 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
             Some(Statement::Expression(operator)) => {
                 let mut arguments: Vec<Expression> = vec![];
                 loop {
-                    match self.lexer.peek().map(|t| &t.data) {
+                    match self.peek_next_token()?.map(|t| &t.data) {
                         Some(TokenData::RightParen) => {
-                            self.advance(1);
+                            self.advance(1)?;
                             return Ok(self.locate(ExpressionBody::ProcedureCall(
                                 Box::new(operator),
                                 arguments,
@@ -612,13 +605,23 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
         }
     }
 
-    fn advance(&mut self, count: usize) -> &mut Option<Token> {
+    fn advance(&mut self, count: usize) -> Result<&mut Option<Token>> {
         for _ in 1..count {
             self.lexer.next();
         }
-        self.current = self.lexer.next();
+        self.current = self.lexer.next().transpose()?;
         self.location = self.current.as_ref().and_then(|t| t.location);
-        &mut self.current
+        Ok(&mut self.current)
+    }
+
+    fn peek_next_token(&mut self) -> Result<Option<&Token>> {
+        match self.lexer.peek() {
+            Some(ret) => match ret {
+                Ok(t) => Ok(Some(t)),
+                Err(e) => Err(e.clone()),
+            },
+            None => Ok(None),
+        }
     }
 
     fn locate<T: PartialEq + Display>(&self, data: T) -> Located<T> {
@@ -645,7 +648,7 @@ pub fn simple_procedure(formals: ParameterFormals, expression: Expression) -> Ex
 #[test]
 fn empty() -> Result<()> {
     let tokens = Vec::new();
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     assert_eq!(parser.parse(), Ok(None));
     Ok(())
 }
@@ -658,10 +661,22 @@ fn def_body_to_statement(t: DefinitionBody) -> Option<Statement> {
     Some(Located::from_data(t).into())
 }
 
+#[cfg(test)]
+pub fn token_stream_to_parser(
+    token_stream: impl Iterator<Item = Token>,
+) -> Parser<impl Iterator<Item = Result<Token>>> {
+    let mapped = token_stream.map(|t| -> Result<Token> { Ok(t) });
+    Parser {
+        current: None,
+        lexer: mapped.peekable(),
+        location: None,
+    }
+}
+
 #[test]
 fn integer() -> Result<()> {
     let tokens = convert_located(vec![TokenData::Integer(1)]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(ast, expr_body_to_statement(ExpressionBody::Integer(1)));
     Ok(())
@@ -670,7 +685,7 @@ fn integer() -> Result<()> {
 #[test]
 fn real_number() -> Result<()> {
     let tokens = convert_located(vec![TokenData::Real("1.2".to_string())]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
@@ -682,7 +697,7 @@ fn real_number() -> Result<()> {
 #[test]
 fn rational() -> Result<()> {
     let tokens = convert_located(vec![TokenData::Rational(1, 2)]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(ast, expr_body_to_statement(ExpressionBody::Rational(1, 2)));
     Ok(())
@@ -691,7 +706,7 @@ fn rational() -> Result<()> {
 #[test]
 fn identifier() -> Result<()> {
     let tokens = convert_located(vec![TokenData::Identifier("test".to_string())]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
@@ -708,7 +723,7 @@ fn vector() -> Result<()> {
         TokenData::Boolean(false),
         TokenData::RightParen,
     ]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
@@ -723,7 +738,7 @@ fn vector() -> Result<()> {
 #[test]
 fn string() -> Result<()> {
     let tokens = convert_located(vec![TokenData::String("hello world".to_string())]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
@@ -742,7 +757,7 @@ fn procedure_call() -> Result<()> {
         TokenData::Integer(3),
         TokenData::RightParen,
     ]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
@@ -769,7 +784,7 @@ fn unmatched_parantheses() {
         TokenData::Integer(2),
         TokenData::Integer(3),
     ]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     assert_eq!(
         parser.parse(),
         Err(SchemeError {
@@ -791,7 +806,7 @@ fn definition() -> Result<()> {
                 TokenData::Integer(1),
                 TokenData::RightParen,
             ]);
-            let mut parser = Parser::from_token_stream(tokens.into_iter());
+            let mut parser = token_stream_to_parser(tokens.into_iter());
             let ast = parser.parse()?;
             assert_eq!(
                 ast,
@@ -817,7 +832,7 @@ fn definition() -> Result<()> {
                 TokenData::RightParen,
                 TokenData::RightParen,
             ]);
-            let mut parser = Parser::from_token_stream(tokens.into_iter());
+            let mut parser = token_stream_to_parser(tokens.into_iter());
             let ast = parser.parse()?;
             assert_eq!(
                 ast,
@@ -850,7 +865,7 @@ fn definition() -> Result<()> {
                 TokenData::Identifier("x".to_string()),
                 TokenData::RightParen,
             ]);
-            let mut parser = Parser::from_token_stream(tokens.into_iter());
+            let mut parser = token_stream_to_parser(tokens.into_iter());
             let ast = parser.parse()?;
             assert_eq!(
                 ast,
@@ -880,7 +895,7 @@ fn nested_procedure_call() -> Result<()> {
         TokenData::RightParen,
         TokenData::RightParen,
     ]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
@@ -922,7 +937,7 @@ fn lambda() -> Result<()> {
             TokenData::RightParen,
             TokenData::RightParen,
         ]);
-        let mut parser = Parser::from_token_stream(tokens.into_iter());
+        let mut parser = token_stream_to_parser(tokens.into_iter());
         let ast = parser.parse()?;
         assert_eq!(
             ast,
@@ -960,7 +975,7 @@ fn lambda() -> Result<()> {
             TokenData::RightParen,
             TokenData::RightParen,
         ]);
-        let mut parser = Parser::from_token_stream(tokens.into_iter());
+        let mut parser = token_stream_to_parser(tokens.into_iter());
         let ast = parser.parse()?;
         assert_eq!(
             ast,
@@ -999,7 +1014,7 @@ fn lambda() -> Result<()> {
             TokenData::RightParen,
             TokenData::RightParen,
         ]);
-        let mut parser = Parser::from_token_stream(tokens.into_iter());
+        let mut parser = token_stream_to_parser(tokens.into_iter());
         let err = parser.parse();
         assert_eq!(
             err,
@@ -1027,7 +1042,7 @@ fn lambda() -> Result<()> {
             TokenData::RightParen,
             TokenData::RightParen,
         ]);
-        let mut parser = Parser::from_token_stream(tokens.into_iter());
+        let mut parser = token_stream_to_parser(tokens.into_iter());
         let ast = parser.parse()?;
         assert_eq!(
             ast,
@@ -1062,7 +1077,7 @@ fn conditional() -> Result<()> {
         TokenData::Integer(2),
         TokenData::RightParen,
     ]);
-    let mut parser = Parser::from_token_stream(tokens.into_iter());
+    let mut parser = token_stream_to_parser(tokens.into_iter());
     assert_eq!(
         parser.parse()?,
         Some(Statement::Expression(Expression::from_data(
@@ -1104,7 +1119,7 @@ fn import_declaration() -> Result<()> {
             TokenData::RightParen,
         ]);
 
-        let mut parser = Parser::from_token_stream(tokens.into_iter());
+        let mut parser = token_stream_to_parser(tokens.into_iter());
         let ast = parser.parse()?;
         assert_eq!(
             ast,

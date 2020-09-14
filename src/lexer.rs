@@ -34,13 +34,13 @@ impl fmt::Display for TokenData {
     }
 }
 
-pub struct TokenGenerator<'a, CharIter: Iterator<Item = char>> {
+pub struct Lexer<CharIter: Iterator<Item = char>> {
     pub current: Option<char>,
-    pub text_iterator: &'a mut Peekable<CharIter>,
+    pub peekable_char_stream: Peekable<CharIter>,
     location: [u32; 2],
 }
 
-impl<'a, CharIter: Iterator<Item = char>> Iterator for TokenGenerator<'a, CharIter> {
+impl<CharIter: Iterator<Item = char>> Iterator for Lexer<CharIter> {
     type Item = Result<Token>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.try_next() {
@@ -74,13 +74,11 @@ fn is_identifier_initial(c: char) -> bool {
     }
 }
 
-impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
-    pub fn from_char_stream(
-        text_iterator: &'a mut Peekable<CharIter>,
-    ) -> TokenGenerator<'a, CharIter> {
+impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
+    pub fn from_char_stream(char_stream: CharIter) -> Lexer<CharIter> {
         Self {
             current: None,
-            text_iterator,
+            peekable_char_stream: char_stream.peekable(),
             location: [1, 1],
         }
     }
@@ -125,7 +123,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
                 },
                 '\'' => Ok(Some(TokenData::Quote)),
                 '`' => Ok(Some(TokenData::Quasiquote)),
-                ',' => match self.text_iterator.peek() {
+                ',' => match self.peekable_char_stream.peek() {
                     Some(nc) => match nc {
                         '@' => {
                             self.advance(1).take();
@@ -136,7 +134,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
                     None => Ok(None),
                 },
                 '.' => self.percular_identifier(),
-                '+' | '-' => match self.text_iterator.peek() {
+                '+' | '-' => match self.peekable_char_stream.peek() {
                     Some('0'..='9') => self.number(),
                     Some('.') => self.number(),
                     _ => self.percular_identifier(),
@@ -152,7 +150,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
 
     fn advance(&mut self, count: usize) -> &mut Option<char> {
         for _ in 0..count {
-            self.current = self.text_iterator.next();
+            self.current = self.peekable_char_stream.next();
             match self.current {
                 Some('\n') => {
                     self.location[0] += 1;
@@ -174,7 +172,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
     }
 
     fn atmosphere(&mut self) -> Result<Option<TokenData>> {
-        while let Some(c) = self.text_iterator.peek() {
+        while let Some(c) = self.peekable_char_stream.peek() {
             match c {
                 ' ' | '\t' | '\n' | '\r' => {
                     self.advance(1);
@@ -186,7 +184,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
     }
 
     fn comment(&mut self) -> Result<Option<TokenData>> {
-        while let Some(c) = self.text_iterator.peek() {
+        while let Some(c) = self.peekable_char_stream.peek() {
             match c {
                 '\n' | '\r' => break,
                 _ => {
@@ -203,7 +201,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
                 let mut identifier_str = String::new();
                 identifier_str.push(c);
                 loop {
-                    if let Some(nc) = self.text_iterator.peek() {
+                    if let Some(nc) = self.peekable_char_stream.peek() {
                         match nc {
                             _ if is_identifier_initial(*nc) => identifier_str.push(*nc),
                             '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(*nc),
@@ -224,7 +222,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
     }
 
     fn dot_subsequent(&mut self, identifier_str: &mut String) -> Result<()> {
-        if let Some(c) = self.text_iterator.peek() {
+        if let Some(c) = self.peekable_char_stream.peek() {
             let valid = match c {
                 '+' | '-' | '.' | '@' => true,
                 _ => is_identifier_initial(*c),
@@ -262,7 +260,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
                 identifier_str.push(c);
                 match c {
                     '+' | '-' => {
-                        let nc = self.text_iterator.peek();
+                        let nc = self.peekable_char_stream.peek();
                         match nc {
                             Some('.') => {
                                 self.advance(1);
@@ -350,7 +348,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
 
     fn digital10(&mut self, number_literal: &mut String) -> Result<()> {
         loop {
-            match self.text_iterator.peek() {
+            match self.peekable_char_stream.peek() {
                 Some(nc) => match nc {
                     '0'..='9' => number_literal.push(*nc),
                     _ => {
@@ -366,7 +364,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
     fn number_suffix(&mut self, number_literal: &mut String) -> Result<()> {
         self.advance(1);
         number_literal.push('e');
-        if let Some(sign) = self.text_iterator.peek() {
+        if let Some(sign) = self.peekable_char_stream.peek() {
             if (*sign == '+') || (*sign == '-') {
                 number_literal.push(*sign);
                 self.advance(1);
@@ -378,12 +376,12 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
     fn real(&mut self, number_literal: &mut String) -> Result<()> {
         number_literal.push('.');
         self.advance(1);
-        match self.text_iterator.peek() {
+        match self.peekable_char_stream.peek() {
             Some(nc) => match nc {
                 'e' => self.number_suffix(number_literal),
                 '0'..='9' => {
                     self.digital10(number_literal)?;
-                    match self.text_iterator.peek() {
+                    match self.peekable_char_stream.peek() {
                         Some('e') => self.number_suffix(number_literal),
                         Some(nnc) => Self::test_delimiter(Some(self.location), *nnc),
                         None => Ok(()),
@@ -404,7 +402,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
                 let mut number_literal = String::new();
                 number_literal.push(c);
                 loop {
-                    let peek = self.text_iterator.peek();
+                    let peek = self.peekable_char_stream.peek();
                     match peek {
                         Some(nc) => match nc {
                             '0'..='9' => self.digital10(&mut number_literal)?,
@@ -453,7 +451,7 @@ impl<'a, CharIter: Iterator<Item = char>> TokenGenerator<'a, CharIter> {
 
 fn tokenize(text: &str) -> Result<Vec<TokenData>> {
     let mut iter = text.chars().peekable();
-    let c = TokenGenerator::from_char_stream(&mut iter);
+    let c = Lexer::from_char_stream(&mut iter);
     Ok(c.collect::<Result<Vec<_>>>()?
         .into_iter()
         .map(|t| t.data)
