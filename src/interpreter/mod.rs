@@ -3,14 +3,15 @@ use crate::environment::*;
 use crate::error::*;
 use crate::lexer::*;
 use crate::parser::*;
+use itertools::join;
 use num_traits::real::Real;
 use smallvec::SmallVec;
-use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
 use std::iter::Iterator;
 use std::marker::PhantomData;
 use std::rc::Rc;
+use std::{cell::RefCell, collections::LinkedList};
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
@@ -189,7 +190,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuildinProcedurePointer<R, 
 #[derive(Clone, PartialEq)]
 pub struct BuildinProcedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub name: &'static str,
-    pub parameter_length: Option<usize>,
+    pub parameters: ParameterFormals,
     pub pointer: BuildinProcedurePointer<R, E>,
 }
 
@@ -210,39 +211,35 @@ pub enum Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Buildin(BuildinProcedure<R, E>),
 }
 
-// impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for Procedure<R, E> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.body == other.body
-//     }
-// }
+impl ParameterFormals {}
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
     pub fn new_buildin_pure(
         name: &'static str,
-        parameter_length: Option<usize>,
+        parameters: ParameterFormals,
         pointer: fn(ArgVec<R, E>) -> Result<Value<R, E>>,
     ) -> Self {
         Self::Buildin(BuildinProcedure {
             name,
-            parameter_length,
+            parameters,
             pointer: BuildinProcedurePointer::Pure(pointer),
         })
     }
     pub fn new_buildin_impure(
         name: &'static str,
-        parameter_length: Option<usize>,
+        parameters: ParameterFormals,
         pointer: fn(ArgVec<R, E>, Rc<RefCell<E>>) -> Result<Value<R, E>>,
     ) -> Self {
         Self::Buildin(BuildinProcedure {
             name,
-            parameter_length,
+            parameters,
             pointer: BuildinProcedurePointer::Impure(pointer),
         })
     }
-    pub fn get_parameter_length(&self) -> Option<usize> {
+    pub fn get_parameters(&self) -> &ParameterFormals {
         match &self {
-            Procedure::User(user, ..) => Some(user.0.len()),
-            Procedure::Buildin(buildin) => buildin.parameter_length,
+            Procedure::User(user, ..) => &user.0,
+            Procedure::Buildin(buildin) => &buildin.parameters,
         }
     }
 }
@@ -265,6 +262,7 @@ pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Datum(Box<Statement>),
     Procedure(Procedure<R, E>),
     Vector(Vec<Value<R, E>>),
+    List(LinkedList<Value<R, E>>),
     Void,
 }
 
@@ -279,14 +277,12 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Value<R, E
             Value::Boolean(false) => write!(f, "#f"),
             Value::Character(c) => write!(f, "#\\{}", c),
             Value::String(ref s) => write!(f, "\"{}\"", s),
-            Value::Vector(vec) => write!(
-                f,
-                "#({})",
-                vec.iter()
-                    .map(|v| format!("{}", v))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            ),
+            Value::Vector(vec) => {
+                write!(f, "#({})", join(vec.iter().map(|v| format!("{}", v)), " "))
+            }
+            Value::List(list) => {
+                write!(f, "({})", join(list.iter().map(|v| format!("{}", v)), " "))
+            }
         }
     }
 }
@@ -318,15 +314,23 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     }
 
     fn apply_scheme_procedure<'a>(
-        formals: &[String],
+        formals: &ParameterFormals,
         internal_definitions: &[Definition],
         expressions: &'a [Expression],
         closure: Rc<RefCell<E>>,
         args: ArgVec<R, E>,
     ) -> Result<TailExpressionResult<'a, R, E>> {
         let local_env = Rc::new(RefCell::new(E::new_child(closure.clone())));
-        for (param, arg) in formals.iter().zip(args.into_iter()) {
+        let mut arg_iter = args.into_iter();
+        for (param, arg) in formals.0.iter().zip(arg_iter.by_ref()) {
             local_env.borrow_mut().define(param.clone(), arg);
+        }
+        // let variadic =
+        if let Some(variadic) = &formals.1 {
+            let list = arg_iter.collect::<LinkedList<_>>();
+            local_env
+                .borrow_mut()
+                .define(variadic.clone(), Value::List(list));
         }
         for DefinitionBody(name, expr) in internal_definitions.into_iter().map(|d| &d.data) {
             let value = Self::eval_expression(&expr, &local_env)?;
@@ -368,6 +372,15 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         mut args: ArgVec<R, E>,
         env: &Rc<RefCell<E>>,
     ) -> Result<Value<R, E>> {
+        let formals = initial_procedure.get_parameters();
+        if args.len() < formals.0.len() || (args.len() > formals.0.len() && formals.1.is_none()) {
+            logic_error!(
+                "expect {}{} arguments, got {}",
+                if formals.1.is_some() { "at least " } else { "" },
+                formals.0.len(),
+                args.len()
+            );
+        }
         let mut current_procedure = None;
         loop {
             match if current_procedure.is_none() {
@@ -654,13 +667,13 @@ fn arithmetic() -> Result<()> {
             Box::new(Expression::from_data(ExpressionBody::Identifier(
                 "min".to_string()
             ))),
-            vec![Expression::from_data(ExpressionBody::Identifier(
-                "+".to_string()
+            vec![Expression::from_data(ExpressionBody::String(
+                "a".to_string()
             ))]
         ))),
         Err(SchemeError {
             category: ErrorType::Logic,
-            message: "expect a number!".to_string(),
+            message: "expect a number, got \"a\"".to_string(),
             location: None
         }),
     );
@@ -670,13 +683,13 @@ fn arithmetic() -> Result<()> {
             Box::new(Expression::from_data(ExpressionBody::Identifier(
                 "max".to_string()
             ))),
-            vec![Expression::from_data(ExpressionBody::Identifier(
-                "+".to_string()
+            vec![Expression::from_data(ExpressionBody::String(
+                "a".to_string()
             ))]
         ))),
         Err(SchemeError {
             category: ErrorType::Logic,
-            message: "expect a number!".to_string(),
+            message: "expect a number, got \"a\"".to_string(),
             location: None
         }),
     );
@@ -795,7 +808,7 @@ fn buildin_procedural() -> Result<()> {
         Statement::Definition(Definition::from_data(DefinitionBody(
             "get-add".to_string(),
             simple_procedure(
-                vec![],
+                ParameterFormals::new(),
                 Expression::from_data(ExpressionBody::Identifier("+".to_string())),
             ),
         ))),
@@ -826,7 +839,7 @@ fn procedure_definition() -> Result<()> {
         Statement::Definition(Definition::from_data(DefinitionBody(
             "add".to_string(),
             simple_procedure(
-                vec!["x".to_string(), "y".to_string()],
+                ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
                 Expression::from_data(ExpressionBody::ProcedureCall(
                     Box::new(Expression::from_data(ExpressionBody::Identifier(
                         "+".to_string(),
@@ -861,7 +874,10 @@ fn lambda_call() -> Result<()> {
     let program = vec![Statement::Expression(Expression::from_data(
         ExpressionBody::ProcedureCall(
             Box::new(simple_procedure(
-                vec!["x".to_string(), "y".to_string()],
+                ParameterFormals(
+                    vec!["x".to_string(), "y".to_string()],
+                    Some("z".to_string()),
+                ),
                 Expression::from_data(ExpressionBody::ProcedureCall(
                     Box::new(Expression::from_data(ExpressionBody::Identifier(
                         "+".to_string(),
@@ -875,6 +891,7 @@ fn lambda_call() -> Result<()> {
             vec![
                 Expression::from_data(ExpressionBody::Integer(1)),
                 Expression::from_data(ExpressionBody::Integer(2)),
+                Expression::from_data(ExpressionBody::String("something-else".to_string())),
             ],
         ),
     ))];
@@ -892,14 +909,14 @@ fn closure() -> Result<()> {
         Statement::Definition(Definition::from_data(DefinitionBody(
             "counter-creator".to_string(),
             Expression::from_data(ExpressionBody::Procedure(SchemeProcedure(
-                vec![],
+                ParameterFormals::new(),
                 vec![Definition::from_data(DefinitionBody(
                     "current".to_string(),
                     Expression::from_data(ExpressionBody::Integer(0)),
                 ))],
                 vec![Expression::from_data(ExpressionBody::Procedure(
                     SchemeProcedure(
-                        vec![],
+                        ParameterFormals::new(),
                         vec![],
                         vec![
                             Expression::from_data(ExpressionBody::Assignment(
@@ -976,7 +993,7 @@ fn local_environment() -> Result<()> {
         Statement::Definition(Definition::from_data(DefinitionBody(
             "adda".to_string(),
             simple_procedure(
-                vec!["x".to_string()],
+                ParameterFormals(vec!["x".to_string()], None),
                 Expression::from_data(ExpressionBody::ProcedureCall(
                     Box::new(Expression::from_data(ExpressionBody::Identifier(
                         "+".to_string(),
@@ -1013,7 +1030,7 @@ fn procedure_as_data() -> Result<()> {
         Statement::Definition(Definition::from_data(DefinitionBody(
             "add".to_string(),
             simple_procedure(
-                vec!["x".to_string(), "y".to_string()],
+                ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
                 Expression::from_data(ExpressionBody::ProcedureCall(
                     Box::new(Expression::from_data(ExpressionBody::Identifier(
                         "+".to_string(),
@@ -1028,7 +1045,10 @@ fn procedure_as_data() -> Result<()> {
         Statement::Definition(Definition::from_data(DefinitionBody(
             "apply-op".to_string(),
             simple_procedure(
-                vec!["op".to_string(), "x".to_string(), "y".to_string()],
+                ParameterFormals(
+                    vec!["op".to_string(), "x".to_string(), "y".to_string()],
+                    None,
+                ),
                 Expression::from_data(ExpressionBody::ProcedureCall(
                     Box::new(Expression::from_data(ExpressionBody::Identifier(
                         "op".to_string(),
