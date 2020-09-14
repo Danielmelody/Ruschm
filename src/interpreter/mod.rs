@@ -221,7 +221,6 @@ fn number_floor() {
     assert_eq!(Number::<f32>::Integer(5).floor(), Number::Integer(5));
     assert_eq!(Number::<f32>::Rational(28, 3).floor(), Number::Integer(9));
     assert_eq!(Number::<f32>::Rational(-43, 7).floor(), Number::Integer(-7));
-    assert_eq!(Number::<f32>::Rational(43, -7).floor(), Number::Integer(-7));
     assert_eq!(Number::<f32>::Rational(-15, 5).floor(), Number::Integer(-3));
     assert_eq!(Number::<f32>::Real(3.8).floor(), Number::Real(3.0));
     assert_eq!(Number::<f32>::Real(-5.3).floor(), Number::Real(-6.0));
