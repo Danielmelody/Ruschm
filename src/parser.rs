@@ -131,8 +131,21 @@ impl fmt::Display for ExpressionBody {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParameterFormals(pub Vec<String>, pub Option<String>);
+
+impl ParameterFormals {
+    pub fn new() -> ParameterFormals {
+        Self(Vec::new(), None)
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
-pub struct SchemeProcedure(pub Vec<String>, pub Vec<Definition>, pub Vec<Expression>);
+pub struct SchemeProcedure(
+    pub ParameterFormals,
+    pub Vec<Definition>,
+    pub Vec<Expression>,
+);
 
 impl fmt::Display for SchemeProcedure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -140,7 +153,10 @@ impl fmt::Display for SchemeProcedure {
         write!(
             f,
             "(lambda ({}) {} {})",
-            formals.join(" "),
+            match &formals.1 {
+                Some(last) => format!("{} . {}", formals.0.join(" "), last),
+                None => formals.0.join(" "),
+            },
             join_displayable(definitions),
             join_displayable(expressions)
         )
@@ -274,7 +290,11 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
     fn get_identifier(&mut self) -> Result<String> {
         match self.current.as_ref().map(|t| &t.data) {
             Some(TokenData::Identifier(ident)) => Ok(ident.clone()),
-            _ => syntax_error!(self.location, "expect an identifier"),
+            Some(o) => syntax_error!(self.location, "expect an identifier, got {}", o),
+            None => syntax_error!(
+                self.location,
+                "expect an identifier while encountered end of input"
+            ),
         }
     }
 
@@ -328,22 +348,48 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
         Ok(self.locate(ExpressionBody::Vector(collection)))
     }
 
-    fn lambda(&mut self) -> Result<Expression> {
-        let mut formals = vec![];
-        let location = self.location;
-        match self.advance(2).take().map(|t| t.data) {
-            Some(TokenData::Identifier(ident)) => {
-                formals.push(ident);
+    fn procedure_formals(&mut self) -> Result<ParameterFormals> {
+        let mut formals = ParameterFormals::new();
+        loop {
+            match self.lexer.peek().map(|t| &t.data) {
+                Some(TokenData::RightParen) => {
+                    self.advance(1);
+                    break Ok(formals);
+                }
+                Some(TokenData::Period) => {
+                    if formals.0.len() == 0 {
+                        syntax_error!(
+                            self.location,
+                            "must provide at least normal parameter before variadic parameter"
+                        )
+                    }
+                    self.advance(2);
+                    formals.1 = Some(self.get_identifier()?);
+                }
+                None => syntax_error!(self.location, "unexpect end of input"),
+                _ => {
+                    self.advance(1);
+                    let parameter = self.get_identifier()?;
+                    formals.0.push(parameter);
+                }
             }
+        }
+    }
+
+    fn lambda(&mut self) -> Result<Expression> {
+        let location = self.location;
+        let mut formals = ParameterFormals::new();
+        match self.advance(2).take().map(|t| t.data) {
+            Some(TokenData::Identifier(ident)) => formals.1 = Some(ident),
             Some(TokenData::LeftParen) => {
-                formals = self.collect(Self::get_identifier)?;
+                formals = self.procedure_formals()?;
             }
             _ => syntax_error!(location, "expect formal identifiers"),
         }
         self.procedure_body(formals)
     }
 
-    fn procedure_body(&mut self, formals: Vec<String>) -> Result<Expression> {
+    fn procedure_body(&mut self, formals: ParameterFormals) -> Result<Expression> {
         let statements = self.collect(Self::parse_current)?;
         let mut definitions = vec![];
         let mut expressions = vec![];
@@ -499,7 +545,15 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
             }
             Some(TokenData::LeftParen) => match self.advance(1).take().map(|t| t.data) {
                 Some(TokenData::Identifier(identifier)) => {
-                    let formals = self.collect(Self::get_identifier)?;
+                    let mut formals = ParameterFormals::new();
+                    match self.lexer.peek().map(|t| &t.data) {
+                        Some(TokenData::Period) => {
+                            self.advance(2);
+                            formals.1 = Some(self.get_identifier()?);
+                            self.advance(1);
+                        }
+                        _ => formals = self.procedure_formals()?,
+                    }
                     let body = self.procedure_body(formals)?;
                     Ok(Definition::from_data(DefinitionBody(identifier, body)))
                 }
@@ -523,7 +577,7 @@ impl<TokenIter: Iterator<Item = Token>> Parser<TokenIter> {
             }
             Some(TokenData::LeftParen) => match self.advance(1).take().map(|t| t.data) {
                 Some(TokenData::Identifier(identifier)) => {
-                    let formals = self.collect(Self::get_identifier)?;
+                    let formals = self.procedure_formals()?;
                     let body = Box::new(self.procedure_body(formals)?);
                     Ok(self.locate(ExpressionBody::Assignment(identifier, body)))
                 }
@@ -581,7 +635,7 @@ pub(crate) fn convert_located<T: PartialEq + Display>(datas: Vec<T>) -> Vec<Loca
 }
 
 #[cfg(test)]
-pub fn simple_procedure(formals: Vec<String>, expression: Expression) -> Expression {
+pub fn simple_procedure(formals: ParameterFormals, expression: Expression) -> Expression {
     Expression::from_data(ExpressionBody::Procedure(SchemeProcedure(
         formals,
         vec![],
@@ -770,7 +824,7 @@ fn definition() -> Result<()> {
                 def_body_to_statement(DefinitionBody(
                     "add".to_string(),
                     simple_procedure(
-                        vec!["x".to_string(), "y".to_string()],
+                        ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
                         Expression::from_data(ExpressionBody::ProcedureCall(
                             Box::new(Expression::from_data(ExpressionBody::Identifier(
                                 "+".to_string()
@@ -780,6 +834,31 @@ fn definition() -> Result<()> {
                                 Expression::from_data(ExpressionBody::Identifier("y".to_string())),
                             ]
                         ))
+                    )
+                ))
+            )
+        }
+        {
+            let tokens = convert_located(vec![
+                TokenData::LeftParen,
+                TokenData::Identifier("define".to_string()),
+                TokenData::LeftParen,
+                TokenData::Identifier("add".to_string()),
+                TokenData::Period,
+                TokenData::Identifier("x".to_string()),
+                TokenData::RightParen,
+                TokenData::Identifier("x".to_string()),
+                TokenData::RightParen,
+            ]);
+            let mut parser = Parser::from_token_stream(tokens.into_iter());
+            let ast = parser.parse()?;
+            assert_eq!(
+                ast,
+                def_body_to_statement(DefinitionBody(
+                    "add".to_string(),
+                    simple_procedure(
+                        ParameterFormals(vec![], Some("x".to_string())),
+                        Expression::from_data(ExpressionBody::Identifier("x".to_string()))
                     )
                 ))
             )
@@ -848,7 +927,7 @@ fn lambda() -> Result<()> {
         assert_eq!(
             ast,
             Some(Statement::Expression(simple_procedure(
-                vec!["x".to_string(), "y".to_string()],
+                ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
                 Expression::from_data(ExpressionBody::ProcedureCall(
                     Box::new(Expression::from_data(ExpressionBody::Identifier(
                         "+".to_string()
@@ -887,7 +966,7 @@ fn lambda() -> Result<()> {
             ast,
             Some(Statement::Expression(Expression::from_data(
                 ExpressionBody::Procedure(SchemeProcedure(
-                    vec!["x".to_string()],
+                    ParameterFormals(vec!["x".to_string()], None),
                     vec![Definition::from_data(DefinitionBody(
                         "y".to_string(),
                         Expression::from_data(ExpressionBody::Integer(1))
@@ -929,6 +1008,44 @@ fn lambda() -> Result<()> {
                 message: "no expression in procedure body".to_string(),
                 location: None
             })
+        );
+    }
+
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("lambda".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("x".to_string()),
+            TokenData::Period,
+            TokenData::Identifier("y".to_string()),
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("+".to_string()),
+            TokenData::Identifier("x".to_string()),
+            TokenData::Identifier("y".to_string()),
+            TokenData::RightParen,
+            TokenData::RightParen,
+        ]);
+        let mut parser = Parser::from_token_stream(tokens.into_iter());
+        let ast = parser.parse()?;
+        assert_eq!(
+            ast,
+            Some(Statement::Expression(Expression::from_data(
+                ExpressionBody::Procedure(SchemeProcedure(
+                    ParameterFormals(vec!["x".to_string()], Some("y".to_string())),
+                    vec![],
+                    vec![Expression::from_data(ExpressionBody::ProcedureCall(
+                        Box::new(Expression::from_data(ExpressionBody::Identifier(
+                            "+".to_string()
+                        ))),
+                        vec![
+                            Expression::from_data(ExpressionBody::Identifier("x".to_string())),
+                            Expression::from_data(ExpressionBody::Identifier("y".to_string()))
+                        ]
+                    ))]
+                ))
+            )))
         );
     }
 
