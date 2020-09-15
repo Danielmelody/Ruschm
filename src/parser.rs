@@ -140,6 +140,21 @@ impl ParameterFormals {
     }
 }
 
+impl Display for ParameterFormals {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.0.len() {
+            0 => match &self.1 {
+                None => write!(f, "()"),
+                Some(variadic) => write!(f, "{}", variadic),
+            },
+            _ => match &self.1 {
+                Some(last) => write!(f, "({} . {})", self.0.join(" "), last),
+                None => write!(f, "({})", self.0.join(" ")),
+            },
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct SchemeProcedure(
     pub ParameterFormals,
@@ -152,12 +167,9 @@ impl fmt::Display for SchemeProcedure {
         let SchemeProcedure(formals, definitions, expressions) = self;
         write!(
             f,
-            "(lambda ({}) {} {})",
-            match &formals.1 {
-                Some(last) => format!("{} . {}", formals.0.join(" "), last),
-                None => formals.0.join(" "),
-            },
-            join_displayable(definitions),
+            "(lambda {} {}{})",
+            formals,
+            [join_displayable(definitions), " ".to_string()].concat(),
             join_displayable(expressions)
         )
     }
