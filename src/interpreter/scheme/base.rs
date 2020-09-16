@@ -3,6 +3,28 @@ use crate::interpreter::*;
 use crate::parser::ParameterFormals;
 use std::collections::HashMap;
 
+fn car<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let mut iter = arguments.into_iter();
+    match iter.next() {
+        Some(Value::List(list)) => Ok(list.car()?.clone()),
+        Some(other) => logic_error!("car target {} is not a list/pair", other),
+        _ => logic_error!("expect a list/pair"),
+    }
+}
+
+fn cdr<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let mut iter = arguments.into_iter();
+    match iter.next() {
+        Some(Value::List(list)) => Ok(list.cdr()?.clone()),
+        Some(other) => logic_error!("cdr target {} is not a list/pair", other),
+        _ => logic_error!("expect a list/pair"),
+    }
+}
+
 fn add<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
@@ -403,6 +425,8 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     vec![
+        function_mapping!("car", vec![], Some("x".to_string()), car),
+        function_mapping!("cdr", vec![], Some("x".to_string()), cdr),
         function_mapping!("+", vec![], Some("x".to_string()), add),
         function_mapping!("-", vec![], Some("x".to_string()), sub),
         function_mapping!("*", vec![], Some("x".to_string()), mul),

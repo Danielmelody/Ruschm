@@ -5,9 +5,9 @@ use crate::lexer::*;
 use crate::parser::*;
 use itertools::join;
 use num_traits::real::Real;
+use pair::{List, Pair};
 use smallvec::SmallVec;
 use std::cmp::Ordering;
-use std::collections::LinkedList;
 use std::fmt;
 use std::iter::Iterator;
 use std::marker::PhantomData;
@@ -15,6 +15,7 @@ use std::rc::Rc;
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
+pub mod pair;
 pub mod scheme;
 
 pub trait RealNumberInternalTrait: fmt::Display + fmt::Debug + Real
@@ -461,10 +462,11 @@ pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Boolean(bool),
     Character(char),
     String(String),
-    Datum(Box<Statement>),
+    Quote(Expression),
+    UnEvaluated(Expression),
     Procedure(Procedure<R, E>),
     Vector(Vec<Value<R, E>>),
-    List(LinkedList<Value<R, E>>),
+    List(List<R, E>),
     Void,
 }
 
@@ -472,7 +474,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Value<R, E
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Value::Number(num) => write!(f, "{}", num),
-            Value::Datum(expr) => write!(f, "{}", expr),
+            Value::Quote(expr) => write!(f, "'{}", expr.data),
+            Value::UnEvaluated(expr) => write!(f, "{}", expr.data),
             Value::Procedure(p) => write!(f, "{}", p),
             Value::Void => write!(f, "Void"),
             Value::Boolean(true) => write!(f, "#t"),
@@ -482,9 +485,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Value<R, E
             Value::Vector(vec) => {
                 write!(f, "#({})", join(vec.iter().map(|v| format!("{}", v)), " "))
             }
-            Value::List(list) => {
-                write!(f, "({})", join(list.iter().map(|v| format!("{}", v)), " "))
-            }
+            Value::List(list) => write!(f, "{}", list),
         }
     }
 }
@@ -529,7 +530,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
         // let variadic =
         if let Some(variadic) = &formals.1 {
-            let list = arg_iter.collect::<LinkedList<_>>();
+            let list = arg_iter.collect::<List<_, _>>();
             local_env.define(variadic.clone(), Value::List(list));
         }
         for DefinitionBody(name, expr) in internal_definitions.into_iter().map(|d| &d.data) {
@@ -575,10 +576,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         let formals = initial_procedure.get_parameters();
         if args.len() < formals.0.len() || (args.len() > formals.0.len() && formals.1.is_none()) {
             logic_error!(
-                "expect {}{} arguments, got {}",
+                "expect {}{} arguments, got {}. parameter list is: {}",
                 if formals.1.is_some() { "at least " } else { "" },
                 formals.0.len(),
-                args.len()
+                args.len(),
+                formals,
             );
         }
         let mut current_procedure = None;
@@ -645,6 +647,37 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         })
     }
 
+    pub fn convert_unevaluated(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
+        match &expression.data {
+            ExpressionBody::Real(_)
+            | ExpressionBody::Rational(..)
+            | ExpressionBody::Integer(_)
+            | ExpressionBody::String(..)
+            | ExpressionBody::Character(..) => Self::eval_expression(expression, env),
+            ExpressionBody::List(list) => Ok(Value::List(
+                list.iter()
+                    .rev()
+                    .map(|i| Self::convert_unevaluated(i, env))
+                    .collect::<Result<_>>()?,
+            )),
+            ExpressionBody::Vector(vec) => Ok(Value::Vector(
+                vec.iter()
+                    .map(|i| Self::convert_unevaluated(i, env))
+                    .collect::<Result<_>>()?,
+            )),
+            ExpressionBody::Quote(inner) => {
+                let cdr = Self::convert_unevaluated(inner, env)?;
+                Ok(Value::List(List::Some(Box::new(Pair::<R, E> {
+                    car: Value::UnEvaluated(Expression::from_data(ExpressionBody::Identifier(
+                        "quote".to_string(),
+                    ))),
+                    cdr,
+                }))))
+            }
+            _ => Ok(Value::UnEvaluated(expression.clone())),
+        }
+    }
+
     pub fn eval_expression(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
@@ -660,6 +693,12 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                     _ => logic_error_with_location!(expression.location, "expect a procedure here"),
                 }
             }
+            ExpressionBody::List(list) => Value::List(
+                list.iter()
+                    .rev()
+                    .map(|i| Self::eval_expression(i, env))
+                    .collect::<Result<List<_, _>>>()?,
+            ),
             ExpressionBody::Vector(vector) => {
                 let mut values = Vec::with_capacity(vector.len());
                 for expr in vector {
@@ -688,7 +727,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                     _ => logic_error!("if condition should be a boolean expression"),
                 }
             }
-            ExpressionBody::Datum(datum) => Value::Datum(datum.clone()),
+            ExpressionBody::Quote(inner) => Self::convert_unevaluated(inner.as_ref(), env)?,
             ExpressionBody::Boolean(value) => Value::Boolean(*value),
             ExpressionBody::Integer(value) => Value::Number(Number::Integer(*value)),
             ExpressionBody::Real(number_literal) => Value::Number(Number::Real(

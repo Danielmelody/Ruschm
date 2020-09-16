@@ -12,12 +12,12 @@ pub enum ErrorType {
     Logic,
 }
 #[derive(Debug, Clone)]
-pub struct Located<T: PartialEq + Display> {
+pub struct Located<T: PartialEq> {
     pub data: T,
     pub location: Option<[u32; 2]>,
 }
 
-impl<T: PartialEq + Display> Located<T> {
+impl<T: PartialEq> Located<T> {
     pub fn from_data(data: T) -> Self {
         Self {
             data,
@@ -31,17 +31,12 @@ impl<T: PartialEq + Display> Located<T> {
     }
 }
 
-impl<T: PartialEq + Display> PartialEq for Located<T> {
+impl<T: PartialEq> PartialEq for Located<T> {
     fn eq(&self, other: &Self) -> bool {
         self.data == other.data
     }
 }
 
-impl<T: PartialEq + Display> Display for Located<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.data.fmt(f)
-    }
-}
 #[derive(Debug, PartialEq, Clone)]
 pub struct SchemeError {
     pub category: ErrorType,
