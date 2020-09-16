@@ -4,7 +4,7 @@ use crate::interpreter::scheme;
 use crate::interpreter::Interpreter;
 use crate::interpreter::RealNumberInternalTrait;
 use crate::interpreter::Value;
-use cell::{Ref, RefCell, RefVal};
+use cell::{Ref, RefCell, RefMut, RefVal};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -18,6 +18,9 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     where
         Self: Sized;
     fn get(&self, name: &str) -> Option<Ref<Value<R, Self>>>
+    where
+        Self: Sized;
+    fn get_mut(&self, name: &str) -> Option<RefMut<Value<R, Self>>>
     where
         Self: Sized;
     fn set(&self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError>
@@ -66,6 +69,18 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
             }
         }
     }
+    fn get_mut(&self, name: &str) -> Option<RefMut<Value<R, Self>>> {
+        if self.definitions.borrow().contains_key(name) {
+            Some(RefMut::map(self.definitions.borrow_mut(), |definitions| {
+                definitions.get_mut(name).unwrap()
+            }))
+        } else {
+            match &self.parent {
+                Some(parent) => parent.get_mut(name),
+                None => None,
+            }
+        }
+    }
 
     fn set(&self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError> {
         match self.definitions.borrow_mut().get_mut(name) {
@@ -104,5 +119,18 @@ fn iter_envs() -> Result<(), SchemeError> {
         assert_ne!(definitions.find(|(name, _)| *name == "sqrt"), None);
     }
 
+    Ok(())
+}
+#[test]
+fn get_mut() -> Result<(), SchemeError> {
+    use crate::interpreter::Number;
+    use std::ops::Deref;
+    let env = StandardEnv::<f32>::new();
+    env.define("x".to_string(), Value::Number(Number::Integer(1)));
+    *env.get_mut("x").unwrap() = Value::Number(Number::Integer(2));
+    assert_eq!(
+        env.get("x").unwrap().deref(),
+        &Value::Number(Number::Integer(2))
+    );
     Ok(())
 }
