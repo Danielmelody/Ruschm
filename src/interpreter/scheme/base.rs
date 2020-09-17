@@ -265,6 +265,57 @@ fn vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     Ok(Value::Vector(ValueReference::new_mutable(vector)))
 }
 
+fn make_vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let mut iter = arguments.into_iter();
+    let k = iter.next().unwrap().expect_integer()?;
+    if k < 0 {
+        logic_error!("expect a non-negative length");
+    }
+    let fill = iter.next().unwrap();
+    Ok(Value::Vector(ValueReference::new_mutable(vec![
+        fill;
+        k as usize
+    ])))
+}
+
+#[test]
+fn buildin_make_vector() {
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> =
+            vec![Value::Number(Number::Integer(3)), Value::Boolean(true)];
+        assert_eq!(
+            make_vector(arguments),
+            Ok(Value::Vector(ValueReference::new_mutable(vec![
+                Value::Boolean(true),
+                Value::Boolean(true),
+                Value::Boolean(true)
+            ])))
+        );
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> =
+            vec![Value::Number(Number::Integer(0)), Value::Boolean(true)];
+        assert_eq!(
+            make_vector(arguments),
+            Ok(Value::Vector(ValueReference::new_mutable(vec![])))
+        );
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> =
+            vec![Value::Number(Number::Integer(-1)), Value::Boolean(true)];
+        assert_eq!(
+            make_vector(arguments),
+            Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: "expect a non-negative length".to_string()
+            })
+        );
+    }
+}
+
 fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
@@ -601,6 +652,12 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         function_mapping!("display", vec!["value".to_string()], None, display),
         function_mapping!("newline", vec![], None, newline),
         function_mapping!("vector", vec![], Some("x".to_string()), vector),
+        function_mapping!(
+            "make-vector",
+            vec!["k".to_string(), "obj".to_string()],
+            None,
+            make_vector
+        ),
         function_mapping!(
             "vector-ref",
             vec!["vector".to_string(), "k".to_string()],
