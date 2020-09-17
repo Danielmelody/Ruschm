@@ -316,6 +316,40 @@ fn buildin_make_vector() {
     }
 }
 
+fn vector_length<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let vector = arguments.into_iter().next().unwrap().expect_vector()?;
+    let len = vector.as_ref().len();
+    Ok(Value::Number(Number::Integer(len as i32)))
+}
+
+#[test]
+fn buildin_vector_length() {
+    {
+        let vector: Value<f32, StandardEnv<_>> =
+            Value::Vector(ValueReference::new_immutable(vec![
+                Value::Number(Number::Integer(5)),
+                Value::String("foo".to_string()),
+                Value::Number(Number::Rational(5, 3)),
+            ]));
+        let arguments = vec![vector.clone()];
+        assert_eq!(
+            vector_length(arguments),
+            Ok(Value::Number(Number::Integer(3)))
+        );
+    }
+    {
+        let vector: Value<f32, StandardEnv<_>> =
+            Value::Vector(ValueReference::new_immutable(vec![]));
+        let arguments = vec![vector.clone()];
+        assert_eq!(
+            vector_length(arguments),
+            Ok(Value::Number(Number::Integer(0)))
+        );
+    }
+}
+
 fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
@@ -657,6 +691,12 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
             vec!["k".to_string(), "obj".to_string()],
             None,
             make_vector
+        ),
+        function_mapping!(
+            "vector-length",
+            vec!["vector".to_string()],
+            None,
+            vector_length
         ),
         function_mapping!(
             "vector-ref",
