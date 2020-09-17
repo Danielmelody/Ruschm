@@ -197,7 +197,7 @@ fn vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let vector: Vec<Value<R, E>> = arguments.into_iter().collect();
-    Ok(Value::Vector(vector))
+    Ok(Value::Vector(Object::new_mutable(vector)))
 }
 
 fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
@@ -208,6 +208,7 @@ fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
         None => logic_error!("vector-ref requires exactly two argument"),
         Some(Value::Vector(vector)) => match iter.next() {
             None => logic_error!("vector-ref requires exactly two argument"),
+            Some(Value::Number(Number::Integer(i))) => match vector.as_ref().get(i as usize) {
                 Some(value) => Ok(value.clone()),
                 None => logic_error!("vector index out of bound"),
             },
@@ -219,11 +220,11 @@ fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 #[test]
 fn buildin_vector_ref() {
-    let vector: Value<f32, StandardEnv<_>> = Value::Vector(vec![
+    let vector: Value<f32, StandardEnv<_>> = Value::Vector(Object::Immutable(vec![
         Value::Number(Number::Integer(5)),
         Value::String("foo".to_string()),
         Value::Number(Number::Rational(5, 3)),
-    ]);
+    ]));
     {
         let arguments = vec![vector.clone(), Value::Number(Number::Integer(0))];
         assert_eq!(vector_ref(arguments), Ok(Value::Number(Number::Integer(5))));
@@ -297,6 +298,172 @@ fn buildin_vector_ref() {
             })
         );
     }
+}
+
+fn vector_set<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let mut iter = arguments.into_iter();
+    let vector = match iter.next() {
+        None => logic_error!("vector-set! requires exactly three argument"),
+        Some(Value::Vector(vector)) => vector,
+        _ => logic_error!("expect a vector!"),
+    };
+    let k = match iter.next() {
+        None => logic_error!("vector-set! requires exactly three argument"),
+        Some(Value::Number(Number::Integer(i))) => i,
+        _ => logic_error!("expect a integer!"),
+    };
+    let obj = match iter.next() {
+        None => logic_error!("vector-set! requires exactly three argument"),
+        Some(value) => value,
+    };
+    match vector.as_mut() {
+        None => logic_error!("expect a mutable vector, get a immutable vector!"),
+        Some(mut vector) => match vector.get_mut(k as usize) {
+            None => logic_error!("vector index out of bound"),
+            Some(value) => {
+                *value = obj;
+            }
+        },
+    }
+    Ok(Value::Void)
+}
+#[test]
+fn buildin_vector_set() -> Result<()> {
+    let vector: Value<f32, StandardEnv<_>> = Value::Vector(Object::new_mutable(vec![
+        Value::Number(Number::Integer(5)),
+        Value::String("foo".to_string()),
+        Value::Number(Number::Rational(5, 3)),
+    ]));
+    {
+        let arguments = vec![
+            vector.clone(),
+            Value::Number(Number::Integer(0)),
+            Value::Number(Number::Real(3.14)),
+        ];
+        assert_eq!(vector_set(arguments), Ok(Value::Void));
+        assert_eq!(
+            vector,
+            Value::Vector(Object::new_mutable(vec![
+                Value::Number(Number::Real(3.14)),
+                Value::String("foo".to_string()),
+                Value::Number(Number::Rational(5, 3)),
+            ]))
+        );
+    }
+    {
+        let arguments = vec![
+            vector.clone(),
+            Value::Number(Number::Integer(1)),
+            Value::Number(Number::Integer(5)),
+        ];
+        assert_eq!(vector_set(arguments), Ok(Value::Void));
+        assert_eq!(
+            vector,
+            Value::Vector(Object::new_mutable(vec![
+                Value::Number(Number::Real(3.14)),
+                Value::Number(Number::Integer(5)),
+                Value::Number(Number::Rational(5, 3)),
+            ]))
+        );
+    }
+    {
+        let arguments = vec![
+            vector.clone(),
+            Value::Number(Number::Integer(2)),
+            Value::String("bar".to_string()),
+        ];
+        assert_eq!(vector_set(arguments), Ok(Value::Void));
+        assert_eq!(
+            vector,
+            Value::Vector(Object::new_mutable(vec![
+                Value::Number(Number::Real(3.14)),
+                Value::Number(Number::Integer(5)),
+                Value::String("bar".to_string()),
+            ]))
+        );
+    }
+    {
+        let arguments = vec![
+            vector.clone(),
+            Value::Number(Number::Integer(3)),
+            Value::Number(Number::Integer(5)),
+        ];
+        assert_eq!(
+            vector_set(arguments),
+            Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: "vector index out of bound".to_string(),
+            })
+        );
+    }
+    {
+        let arguments = vec![
+            vector.clone(),
+            Value::Number(Number::Rational(31, 5)),
+            Value::Number(Number::Integer(5)),
+        ];
+        assert_eq!(
+            vector_set(arguments),
+            Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: "expect a integer!".to_string(),
+            })
+        );
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
+            Value::Number(Number::Integer(1)),
+            Value::Number(Number::Integer(1)),
+            Value::Number(Number::Integer(5)),
+        ];
+        assert_eq!(
+            vector_set(arguments),
+            Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: "expect a vector!".to_string(),
+            })
+        );
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![];
+        assert_eq!(
+            vector_set(arguments),
+            Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: "vector-set! requires exactly three argument".to_string(),
+            })
+        );
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![vector.clone()];
+        assert_eq!(
+            vector_set(arguments),
+            Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: "vector-set! requires exactly three argument".to_string(),
+            })
+        );
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> =
+            vec![vector, Value::Number(Number::Integer(1))];
+        assert_eq!(
+            vector_set(arguments),
+            Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: "vector-set! requires exactly three argument".to_string(),
+            })
+        );
+    }
+    Ok(())
 }
 
 fn display<R: RealNumberInternalTrait, E: IEnvironment<R>>(
@@ -431,12 +598,18 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         ),
         function_mapping!("display", vec!["value".to_string()], None, display),
         function_mapping!("newline", vec![], None, newline),
-        function_mapping!("vector", vec![], None, vector),
+        function_mapping!("vector", vec![], Some("x".to_string()), vector),
         function_mapping!(
             "vector-ref",
             vec!["vector".to_string(), "k".to_string()],
             None,
             vector_ref
+        ),
+        function_mapping!(
+            "vector-set!",
+            vec!["vector".to_string(), "k".to_string(), "obj".to_string()],
+            None,
+            vector_set
         ),
     ]
     .into_iter()
