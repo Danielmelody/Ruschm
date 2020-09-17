@@ -473,12 +473,57 @@ impl<T> Object<T> {
             Object::Mutable(t) => Box::new(t.borrow()),
         }
     }
-    pub fn as_mut<'a>(&'a self) -> Option<RefMut<'a, T>> {
+    pub fn as_mut<'a>(&'a self) -> Result<RefMut<'a, T>> {
         match self {
-            Object::Immutable(_) => None,
-            Object::Mutable(t) => Some(t.borrow_mut()),
+            Object::Immutable(_) => Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: "expect a mutable object, get a immutable object!".to_string(),
+            }),
+            Object::Mutable(t) => Ok(t.borrow_mut()),
         }
     }
+}
+
+macro_rules! match_expect_type {
+    ($value:expr, $type:pat => $inner: expr, $type_name:expr) => {
+        match $value {
+            $type => Ok($inner),
+            v => Err(SchemeError {
+                location: None,
+                category: ErrorType::Logic,
+                message: format!("expect a {}, got {}", $type_name, v),
+            }),
+        }
+    };
+}
+#[test]
+fn macro_match_expect_type() {
+    assert_eq!(
+        match_expect_type!(
+            Value::<f32, StandardEnv<_>>::Number(Number::Integer(5)),
+            Value::Number(Number::Integer(i)) => i, "integer"
+        ),
+        Ok(5)
+    );
+    assert_eq!(
+        match_expect_type!(
+            Value::<f32, StandardEnv<_>>::Number(Number::Integer(1)),
+            Value::Number(Number::Integer(i)) => i + 3, "integer"
+        ),
+        Ok(4)
+    );
+    assert_eq!(
+        match_expect_type!(
+            Value::<f32, StandardEnv<_>>::Number(Number::Integer(5)),
+            Value::String(s) => s, "string"
+        ),
+        Err(SchemeError {
+            location: None,
+            category: ErrorType::Logic,
+            message: "expect a string, got 5".to_string(),
+        })
+    );
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
@@ -492,6 +537,20 @@ pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Pair(Box<Pair<R, E>>),
     EmptyList,
     Void,
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
+    pub fn expect_number(self) -> Result<Number<R>> {
+        match_expect_type!(self, Value::Number(number) => number, "number")
+    }
+
+    pub fn expect_integer(self) -> Result<i32> {
+        match_expect_type!(self, Value::Number(Number::Integer(i)) => i, "integer")
+    }
+
+    pub fn expect_vector(self) -> Result<Object<Vec<Value<R, E>>>> {
+        match_expect_type!(self, Value::Vector(vector) => vector, "vector")
+    }
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Value<R, E> {
