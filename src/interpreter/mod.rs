@@ -7,11 +7,11 @@ use itertools::join;
 use num_traits::real::Real;
 use smallvec::SmallVec;
 use std::cmp::Ordering;
+use std::collections::LinkedList;
 use std::fmt;
 use std::iter::Iterator;
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::{cell::RefCell, collections::LinkedList};
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
@@ -379,10 +379,10 @@ pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
 #[derive(Clone, PartialEq)]
 pub enum BuildinProcedurePointer<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Pure(fn(ArgVec<R, E>) -> Result<Value<R, E>>),
-    Impure(fn(ArgVec<R, E>, Rc<RefCell<E>>) -> Result<Value<R, E>>),
+    Impure(fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>),
 }
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuildinProcedurePointer<R, E> {
-    pub fn apply(&self, args: ArgVec<R, E>, env: &Rc<RefCell<E>>) -> Result<Value<R, E>> {
+    pub fn apply(&self, args: ArgVec<R, E>, env: &Rc<E>) -> Result<Value<R, E>> {
         match &self {
             Self::Pure(pointer) => pointer(args),
             Self::Impure(pointer) => pointer(args, env.clone()),
@@ -409,7 +409,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Debug for BuildinProce
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    User(SchemeProcedure, Rc<RefCell<E>>),
+    User(SchemeProcedure, Rc<E>),
     Buildin(BuildinProcedure<R, E>),
 }
 
@@ -430,7 +430,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
     pub fn new_buildin_impure(
         name: &'static str,
         parameters: ParameterFormals,
-        pointer: fn(ArgVec<R, E>, Rc<RefCell<E>>) -> Result<Value<R, E>>,
+        pointer: fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>,
     ) -> Self {
         Self::Buildin(BuildinProcedure {
             name,
@@ -498,19 +498,19 @@ fn check_division_by_zero(num: i32) -> Result<()> {
 
 #[derive(Debug, Clone, PartialEq)]
 enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    TailCall(&'a Expression, &'a [Expression], Rc<RefCell<E>>),
+    TailCall(&'a Expression, &'a [Expression], Rc<E>),
     Value(Value<R, E>),
 }
 
 pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    pub env: Rc<RefCell<E>>,
+    pub env: Rc<E>,
     _marker: PhantomData<R>,
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn new() -> Self {
         Self {
-            env: Rc::new(RefCell::new(E::new())),
+            env: Rc::new(E::new()),
             _marker: PhantomData,
         }
     }
@@ -519,24 +519,22 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         formals: &ParameterFormals,
         internal_definitions: &[Definition],
         expressions: &'a [Expression],
-        closure: Rc<RefCell<E>>,
+        closure: Rc<E>,
         args: ArgVec<R, E>,
     ) -> Result<TailExpressionResult<'a, R, E>> {
-        let local_env = Rc::new(RefCell::new(E::new_child(closure.clone())));
+        let local_env = Rc::new(E::new_child(closure.clone()));
         let mut arg_iter = args.into_iter();
         for (param, arg) in formals.0.iter().zip(arg_iter.by_ref()) {
-            local_env.borrow_mut().define(param.clone(), arg);
+            local_env.define(param.clone(), arg);
         }
         // let variadic =
         if let Some(variadic) = &formals.1 {
             let list = arg_iter.collect::<LinkedList<_>>();
-            local_env
-                .borrow_mut()
-                .define(variadic.clone(), Value::List(list));
+            local_env.define(variadic.clone(), Value::List(list));
         }
         for DefinitionBody(name, expr) in internal_definitions.into_iter().map(|d| &d.data) {
             let value = Self::eval_expression(&expr, &local_env)?;
-            local_env.borrow_mut().define(name.clone(), value)
+            local_env.define(name.clone(), value)
         }
         match expressions.split_last() {
             Some((last, other)) => {
@@ -556,7 +554,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     fn eval_procedure_call(
         procedure_expr: &Expression,
         arguments: &[Expression],
-        env: &Rc<RefCell<E>>,
+        env: &Rc<E>,
     ) -> Result<(Procedure<R, E>, ArgVec<R, E>)> {
         let first = Self::eval_expression(procedure_expr, env)?;
         let evaluated_args_result: Result<ArgVec<R, E>> = arguments
@@ -572,7 +570,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn apply_procedure<'a>(
         initial_procedure: &Procedure<R, E>,
         mut args: ArgVec<R, E>,
-        env: &Rc<RefCell<E>>,
+        env: &Rc<E>,
     ) -> Result<Value<R, E>> {
         let formals = initial_procedure.get_parameters();
         if args.len() < formals.0.len() || (args.len() > formals.0.len() && formals.1.is_none()) {
@@ -626,7 +624,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 
     fn eval_tail_expression<'a>(
         expression: &'a Expression,
-        env: Rc<RefCell<E>>,
+        env: Rc<E>,
     ) -> Result<TailExpressionResult<'a, R, E>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
@@ -647,7 +645,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         })
     }
 
-    pub fn eval_expression(expression: &Expression, env: &Rc<RefCell<E>>) -> Result<Value<R, E>> {
+    pub fn eval_expression(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
                 let first = Self::eval_expression(procedure_expr, env)?;
@@ -673,7 +671,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             ExpressionBody::String(string) => Value::String(string.clone()),
             ExpressionBody::Assignment(name, value_expr) => {
                 let value = Self::eval_expression(value_expr, env)?;
-                env.borrow_mut().set(name, value)?;
+                env.set(name, value)?;
                 Value::Void
             }
             ExpressionBody::Procedure(scheme) => {
@@ -698,7 +696,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             )),
             // TODO: apply gcd here.
             ExpressionBody::Rational(a, b) => Value::Number(Number::Rational(*a, *b as i32)),
-            ExpressionBody::Identifier(ident) => match env.borrow().get(ident.as_str()) {
+            ExpressionBody::Identifier(ident) => match env.get(ident.as_str()) {
                 Some(value) => value.clone(),
                 None => logic_error_with_location!(
                     expression.location,
@@ -709,7 +707,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         })
     }
 
-    pub fn eval_ast(ast: &Statement, env: Rc<RefCell<E>>) -> Result<Option<Value<R, E>>> {
+    pub fn eval_ast(ast: &Statement, env: Rc<E>) -> Result<Option<Value<R, E>>> {
         Ok(match ast {
             Statement::ImportDeclaration(_) => None, // TODO
             Statement::Expression(expr) => Some(Self::eval_expression(&expr, &env)?),
@@ -718,7 +716,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 ..
             }) => {
                 let value = Self::eval_expression(&expr, &env)?;
-                env.borrow_mut().define(name.clone(), value);
+                env.define(name.clone(), value);
                 None
             }
         })
