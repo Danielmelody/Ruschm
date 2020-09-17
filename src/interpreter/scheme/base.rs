@@ -205,10 +205,9 @@ fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     match iter.next() {
-        None => logic_error!("vector_ref requires exactly two argument"),
+        None => logic_error!("vector-ref requires exactly two argument"),
         Some(Value::Vector(vector)) => match iter.next() {
-            None => logic_error!("vector_ref requires exactly two argument"),
-            Some(Value::Number(Number::Integer(i))) => match vector.get(i as usize) {
+            None => logic_error!("vector-ref requires exactly two argument"),
                 Some(value) => Ok(value.clone()),
                 None => logic_error!("vector index out of bound"),
             },
@@ -283,7 +282,7 @@ fn buildin_vector_ref() {
             Err(SchemeError {
                 location: None,
                 category: ErrorType::Logic,
-                message: "vector_ref requires exactly two argument".to_string(),
+                message: "vector-ref requires exactly two argument".to_string(),
             })
         );
     }
@@ -294,7 +293,7 @@ fn buildin_vector_ref() {
             Err(SchemeError {
                 location: None,
                 category: ErrorType::Logic,
-                message: "vector_ref requires exactly two argument".to_string(),
+                message: "vector-ref requires exactly two argument".to_string(),
             })
         );
     }
