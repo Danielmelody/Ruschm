@@ -8,7 +8,7 @@ use cell::{Ref, RefCell, RefMut, RefVal};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-pub type DefinitionIter<'a, R, E> = Box<dyn 'a + Iterator<Item = (&'a str, &'a Value<R, E>)>>;
+pub type DefinitionIter<'a, R, E> = Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, E>)>>;
 
 pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + PartialEq {
     fn new() -> Self
@@ -94,11 +94,10 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
     }
 
     fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R, Self>> {
-        Ref::map_val(self.definitions.borrow(), |definitions| {
-            let iter: DefinitionIter<'b, R, Self> =
-                Box::new(definitions.iter().map(|(s, v)| (s.as_str(), v)));
-            iter
-        })
+        Ref::map_val(
+            self.definitions.borrow(),
+            |definitions| -> DefinitionIter<'b, R, Self> { Box::new(definitions.iter()) },
+        )
     }
 }
 
@@ -127,7 +126,17 @@ fn get_mut() -> Result<(), SchemeError> {
     use std::ops::Deref;
     let env = StandardEnv::<f32>::new();
     env.define("x".to_string(), Value::Number(Number::Integer(1)));
-    *env.get_mut("x").unwrap() = Value::Number(Number::Integer(2));
+    {
+        let value_mut = env.get_mut("x").unwrap();
+        let mut i = RefMut::map(value_mut, |value_mut| {
+            if let Value::Number(Number::Integer(i)) = value_mut {
+                i
+            } else {
+                unreachable!()
+            }
+        });
+        *i += 1;
+    }
     assert_eq!(
         env.get("x").unwrap().deref(),
         &Value::Number(Number::Integer(2))
