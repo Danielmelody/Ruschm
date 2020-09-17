@@ -3,6 +3,7 @@ use crate::environment::*;
 use crate::error::*;
 use crate::lexer::*;
 use crate::parser::*;
+use cell::{RefCell, RefMut};
 use itertools::join;
 use num_traits::real::Real;
 use pair::Pair;
@@ -11,7 +12,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::iter::Iterator;
 use std::marker::PhantomData;
-use std::rc::Rc;
+use std::{ops::Deref, rc::Rc};
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
@@ -457,6 +458,29 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Procedure<
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Object<T> {
+    Immutable(T),
+    Mutable(Rc<RefCell<T>>),
+}
+
+impl<T> Object<T> {
+    pub fn new_mutable(t: T) -> Self {
+        Self::Mutable(Rc::new(RefCell::new(t)))
+    }
+    pub fn as_ref<'a>(&'a self) -> Box<dyn 'a + Deref<Target = T>> {
+        match self {
+            Object::Immutable(t) => Box::new(t),
+            Object::Mutable(t) => Box::new(t.borrow()),
+        }
+    }
+    pub fn as_mut<'a>(&'a self) -> Option<RefMut<'a, T>> {
+        match self {
+            Object::Immutable(_) => None,
+            Object::Mutable(t) => Some(t.borrow_mut()),
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Number(Number<R>),
     Boolean(bool),
@@ -464,7 +488,7 @@ pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     String(String),
     Symbol(String),
     Procedure(Procedure<R, E>),
-    Vector(Vec<Value<R, E>>),
+    Vector(Object<Vec<Value<R, E>>>),
     Pair(Box<Pair<R, E>>),
     EmptyList,
     Void,
@@ -481,9 +505,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Value<R, E
             Value::Boolean(false) => write!(f, "#f"),
             Value::Character(c) => write!(f, "#\\{}", c),
             Value::String(ref s) => write!(f, "\"{}\"", s),
-            Value::Vector(vec) => {
-                write!(f, "#({})", join(vec.iter().map(|v| format!("{}", v)), " "))
-            }
+            Value::Vector(vec) => write!(
+                f,
+                "#({})",
+                join(vec.as_ref().iter().map(|v| format!("{}", v)), " ")
+            ),
             Value::Pair(list) => write!(f, "{}", list),
             Value::EmptyList => write!(f, "()"),
         }
@@ -683,11 +709,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                         .collect::<Result<_>>()?),
                 }
             }
-            ExpressionBody::Vector(vec) => Ok(Value::Vector(
+            ExpressionBody::Vector(vec) => Ok(Value::Vector(Object::Immutable(
                 vec.iter()
                     .map(|i| Self::read_literal(i, env))
                     .collect::<Result<_>>()?,
-            )),
+            ))),
             ExpressionBody::Quote(inner) => Ok(vec![
                 Self::read_literal(inner, env)?,
                 Value::Symbol("quote".to_string()),
