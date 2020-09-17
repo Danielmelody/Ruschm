@@ -58,18 +58,15 @@ fn sub<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
-    let init = match iter.next() {
-        None => logic_error!("'-' needs at least one argument"),
-        Some(first) => match first {
-            Value::Number(first_num) => match iter.next() {
-                Some(second) => match second {
-                    Value::Number(second_num) => Value::Number(first_num - second_num),
-                    o => logic_error!("expect a number, got {}", o),
-                },
-                None => Value::Number(Number::Integer(0) - first_num),
+    let init = match iter.next().unwrap() {
+        Value::Number(first_num) => match iter.next() {
+            Some(second) => match second {
+                Value::Number(second_num) => Value::Number(first_num - second_num),
+                o => logic_error!("expect a number, got {}", o),
             },
-            o => logic_error!("expect a number, got {}", o),
+            None => Value::Number(Number::Integer(0) - first_num),
         },
+        o => logic_error!("expect a number, got {}", o),
     };
     iter.try_fold(init, |a, b| match (a, b) {
         (Value::Number(num1), Value::Number(num2)) => Ok(Value::Number(num1 - num2)),
@@ -91,18 +88,15 @@ fn div<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
-    let init = match iter.next() {
-        None => logic_error!("'/' needs at least one argument"),
-        Some(first) => match first {
-            Value::Number(first_num) => match iter.next() {
-                Some(second) => match second {
-                    Value::Number(second_num) => Value::Number((first_num / second_num)?),
-                    o => logic_error!("expect a number, got {}", o),
-                },
-                None => Value::Number((Number::Integer(1) / first_num)?),
+    let init = match iter.next().unwrap() {
+        Value::Number(first_num) => match iter.next() {
+            Some(second) => match second {
+                Value::Number(second_num) => Value::Number((first_num / second_num)?),
+                o => logic_error!("expect a number, got {}", o),
             },
-            o => logic_error!("expect a number, got {}", o),
+            None => Value::Number((Number::Integer(1) / first_num)?),
         },
+        o => logic_error!("expect a number, got {}", o),
     };
     iter.try_fold(init, |a, b| match (a, b) {
         (Value::Number(num1), Value::Number(num2)) => Ok(Value::Number((num1 / num2)?)),
@@ -114,10 +108,9 @@ macro_rules! numeric_one_argument {
         fn $func<R: RealNumberInternalTrait, E: IEnvironment<R>>(
             arguments: impl IntoIterator<Item = Value<R, E>>,
         ) -> Result<Value<R, E>> {
-            match arguments.into_iter().next() {
-                Some(Value::Number(number)) => Ok(Value::Number(number.$func()$($err_handle)?)),
-                Some(other) => logic_error!("{} requires a number, got {:?}", $name, other),
-                _ => logic_error!("{} takes exactly one argument", $name),
+            match arguments.into_iter().next().unwrap() {
+                Value::Number(number) => Ok(Value::Number(number.$func()$($err_handle)?)),
+                other => logic_error!("{} requires a number, got {:?}", $name, other),
             }
         }
     };
@@ -147,17 +140,6 @@ fn buildin_numeric_one() {
             })
         );
     }
-    {
-        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![];
-        assert_eq!(
-            floor(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "floor takes exactly one argument".to_string(),
-            })
-        );
-    }
 }
 
 macro_rules! numeric_two_arguments {
@@ -166,15 +148,13 @@ macro_rules! numeric_two_arguments {
             arguments: impl IntoIterator<Item = Value<R, E>>,
         ) -> Result<Value<R, E>> {
             let mut iter = arguments.into_iter();
-            let lhs = match iter.next() {
-                Some(Value::Number(number)) => number,
-                Some(_) => logic_error!("expect a number!"),
-                _ => logic_error!("{} takes exactly two arguments", $name),
+            let lhs = match iter.next().unwrap() {
+                Value::Number(number) => number,
+                _ => logic_error!("expect a number!"),
             };
-            let rhs = match iter.next() {
-                Some(Value::Number(number)) => number,
-                Some(_) => logic_error!("expect a number!"),
-                _ => logic_error!("{} takes exactly two arguments", $name),
+            let rhs = match iter.next().unwrap() {
+                Value::Number(number) => number,
+                _ => logic_error!("expect a number!"),
             };
             Ok(Value::Number(lhs.$func(rhs)$($err_handle)?))
         }
@@ -210,28 +190,6 @@ fn buildin_numeric_two() {
             })
         );
     }
-    {
-        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::Number(Number::Integer(1))];
-        assert_eq!(
-            floor_remainder(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "floor-remainder takes exactly two arguments".to_string(),
-            })
-        );
-    }
-    {
-        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![];
-        assert_eq!(
-            floor_quotient(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "floor-quotient takes exactly two arguments".to_string(),
-            })
-        );
-    }
 }
 fn vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
@@ -244,11 +202,9 @@ fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
-    match iter.next() {
-        None => logic_error!("vector-ref requires exactly two argument"),
-        Some(Value::Vector(vector)) => match iter.next() {
-            None => logic_error!("vector-ref requires exactly two argument"),
-            Some(Value::Number(Number::Integer(i))) => match vector.as_ref().get(i as usize) {
+    match iter.next().unwrap() {
+        Value::Vector(vector) => match iter.next().unwrap() {
+            Value::Number(Number::Integer(i)) => match vector.as_ref().get(i as usize) {
                 Some(value) => Ok(value.clone()),
                 None => logic_error!("vector index out of bound"),
             },
@@ -316,48 +272,21 @@ fn buildin_vector_ref() {
             })
         );
     }
-    {
-        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![];
-        assert_eq!(
-            vector_ref(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "vector-ref requires exactly two argument".to_string(),
-            })
-        );
-    }
-    {
-        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![vector];
-        assert_eq!(
-            vector_ref(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "vector-ref requires exactly two argument".to_string(),
-            })
-        );
-    }
 }
 
 fn vector_set<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
-    let vector = match iter.next() {
-        None => logic_error!("vector-set! requires exactly three argument"),
-        Some(Value::Vector(vector)) => vector,
+    let vector = match iter.next().unwrap() {
+        Value::Vector(vector) => vector,
         _ => logic_error!("expect a vector!"),
     };
-    let k = match iter.next() {
-        None => logic_error!("vector-set! requires exactly three argument"),
-        Some(Value::Number(Number::Integer(i))) => i,
+    let k = match iter.next().unwrap() {
+        Value::Number(Number::Integer(i)) => i,
         _ => logic_error!("expect a integer!"),
     };
-    let obj = match iter.next() {
-        None => logic_error!("vector-set! requires exactly three argument"),
-        Some(value) => value,
-    };
+    let obj = iter.next().unwrap();
     match vector.as_mut() {
         None => logic_error!("expect a mutable vector, get a immutable vector!"),
         Some(mut vector) => match vector.get_mut(k as usize) {
@@ -469,65 +398,21 @@ fn buildin_vector_set() -> Result<()> {
             })
         );
     }
-    {
-        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![];
-        assert_eq!(
-            vector_set(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "vector-set! requires exactly three argument".to_string(),
-            })
-        );
-    }
-    {
-        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![vector.clone()];
-        assert_eq!(
-            vector_set(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "vector-set! requires exactly three argument".to_string(),
-            })
-        );
-    }
-    {
-        let arguments: Vec<Value<f32, StandardEnv<_>>> =
-            vec![vector, Value::Number(Number::Integer(1))];
-        assert_eq!(
-            vector_set(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "vector-set! requires exactly three argument".to_string(),
-            })
-        );
-    }
     Ok(())
 }
 
 fn display<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
-    Ok(match arguments.into_iter().next() {
-        Some(value) => {
-            print!("{}", value);
-            Value::Void
-        }
-        None => logic_error!("display takes exactly one argument"),
-    })
+    print!("{}", arguments.into_iter().next().unwrap());
+    Ok(Value::Void)
 }
 
 fn newline<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-    arguments: impl IntoIterator<Item = Value<R, E>>,
+    _: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
-    Ok(match arguments.into_iter().next() {
-        None => {
-            println!("");
-            Value::<R, E>::Void
-        }
-        _ => logic_error!("display takes exactly one argument"),
-    })
+    println!("");
+    Ok(Value::Void)
 }
 
 macro_rules! comparision {
@@ -571,20 +456,19 @@ macro_rules! first_of_order {
                         arguments: impl IntoIterator<Item = Value<R, E>>
         ) -> Result<Value<R, E>> {
             let mut iter = arguments.into_iter();
-            match iter.next() {
-                None => logic_error!("min requires at least one argument!"),
-                Some(Value::Number(num)) => {
+            match iter.next().unwrap() {
+                Value::Number(num) => {
                     iter.try_fold(Value::Number(num), |a, b| match (a, b) {
-                                (Value::Number(num1), Value::Number(num2)) => {
-                                    Ok(Value::Number(match num1 $cmp num2 {
-                                        true => upcast_oprands((num1, num2)).lhs(),
-                                        false => upcast_oprands((num1, num2)).rhs(),
-                                    }))
-                                }
-                                o => logic_error!("expect a number, got {}", o.1),
-                            })
-                        },
-                Some(o) => logic_error!("expect a number, got {}", o),
+                        (Value::Number(num1), Value::Number(num2)) => {
+                            Ok(Value::Number(match num1 $cmp num2 {
+                                true => upcast_oprands((num1, num2)).lhs(),
+                                false => upcast_oprands((num1, num2)).rhs(),
+                            }))
+                        }
+                        o => logic_error!("expect a number, got {}", o.1),
+                    })
+                },
+                o => logic_error!("expect a number, got {}", o),
                 }
             }
         }
@@ -619,16 +503,16 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         ),
         function_mapping!("pair?", vec!["obj".to_string()], None, ispair),
         function_mapping!("+", vec![], Some("x".to_string()), add),
-        function_mapping!("-", vec![], Some("x".to_string()), sub),
+        function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
         function_mapping!("*", vec![], Some("x".to_string()), mul),
-        function_mapping!("/", vec![], Some("x".to_string()), div),
+        function_mapping!("/", vec!["x1".to_string()], Some("x".to_string()), div),
         function_mapping!("=", vec![], Some("x".to_string()), equals),
         function_mapping!("<", vec![], Some("x".to_string()), less),
         function_mapping!("<=", vec![], Some("x".to_string()), less_equal),
         function_mapping!(">", vec![], Some("x".to_string()), greater),
         function_mapping!(">=", vec![], Some("x".to_string()), greater_equal),
-        function_mapping!("min", vec![], Some("x".to_string()), min),
-        function_mapping!("max", vec![], Some("x".to_string()), max),
+        function_mapping!("min", vec!["x1".to_string()], Some("x".to_string()), min),
+        function_mapping!("max", vec!["x1".to_string()], Some("x".to_string()), max),
         function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
         function_mapping!("floor", vec!["x".to_string()], None, floor),
         function_mapping!("ceiling", vec!["x".to_string()], None, ceiling),
