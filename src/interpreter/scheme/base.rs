@@ -222,7 +222,7 @@ fn vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let vector: Vec<Value<R, E>> = arguments.into_iter().collect();
-    Ok(Value::Vector(Object::new_mutable(vector)))
+    Ok(Value::Vector(ValueReference::new_mutable(vector)))
 }
 
 fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
@@ -240,7 +240,7 @@ fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 #[test]
 fn buildin_vector_ref() {
-    let vector: Value<f32, StandardEnv<_>> = Value::Vector(Object::Immutable(vec![
+    let vector: Value<f32, StandardEnv<_>> = Value::Vector(ValueReference::new_immutable(vec![
         Value::Number(Number::Integer(5)),
         Value::String("foo".to_string()),
         Value::Number(Number::Rational(5, 3)),
@@ -291,7 +291,7 @@ fn vector_set<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 #[test]
 fn buildin_vector_set() -> Result<()> {
-    let vector: Value<f32, StandardEnv<_>> = Value::Vector(Object::new_mutable(vec![
+    let vector: Value<f32, StandardEnv<_>> = Value::Vector(ValueReference::new_mutable(vec![
         Value::Number(Number::Integer(5)),
         Value::String("foo".to_string()),
         Value::Number(Number::Rational(5, 3)),
@@ -305,7 +305,7 @@ fn buildin_vector_set() -> Result<()> {
         assert_eq!(vector_set(arguments), Ok(Value::Void));
         assert_eq!(
             vector,
-            Value::Vector(Object::new_mutable(vec![
+            Value::Vector(ValueReference::new_mutable(vec![
                 Value::Number(Number::Real(3.14)),
                 Value::String("foo".to_string()),
                 Value::Number(Number::Rational(5, 3)),
@@ -321,7 +321,7 @@ fn buildin_vector_set() -> Result<()> {
         assert_eq!(vector_set(arguments), Ok(Value::Void));
         assert_eq!(
             vector,
-            Value::Vector(Object::new_mutable(vec![
+            Value::Vector(ValueReference::new_mutable(vec![
                 Value::Number(Number::Real(3.14)),
                 Value::Number(Number::Integer(5)),
                 Value::Number(Number::Rational(5, 3)),
@@ -337,7 +337,7 @@ fn buildin_vector_set() -> Result<()> {
         assert_eq!(vector_set(arguments), Ok(Value::Void));
         assert_eq!(
             vector,
-            Value::Vector(Object::new_mutable(vec![
+            Value::Vector(ValueReference::new_mutable(vec![
                 Value::Number(Number::Real(3.14)),
                 Value::Number(Number::Integer(5)),
                 Value::String("bar".to_string()),

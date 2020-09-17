@@ -457,29 +457,32 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Procedure<
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Object<T> {
-    Immutable(T),
+pub enum ValueReference<T> {
+    Immutable(Rc<T>),
     Mutable(Rc<RefCell<T>>),
 }
 
-impl<T> Object<T> {
+impl<T> ValueReference<T> {
+    pub fn new_immutable(t: T) -> Self {
+        Self::Immutable(Rc::new(t))
+    }
     pub fn new_mutable(t: T) -> Self {
         Self::Mutable(Rc::new(RefCell::new(t)))
     }
     pub fn as_ref<'a>(&'a self) -> Box<dyn 'a + Deref<Target = T>> {
         match self {
-            Object::Immutable(t) => Box::new(t),
-            Object::Mutable(t) => Box::new(t.borrow()),
+            ValueReference::Immutable(t) => Box::new(t.as_ref()),
+            ValueReference::Mutable(t) => Box::new(t.borrow()),
         }
     }
     pub fn as_mut<'a>(&'a self) -> Result<RefMut<'a, T>> {
         match self {
-            Object::Immutable(_) => Err(SchemeError {
+            ValueReference::Immutable(_) => Err(SchemeError {
                 location: None,
                 category: ErrorType::Logic,
-                message: "expect a mutable object, get a immutable object!".to_string(),
+                message: "expect a mutable reference, get a immutable reference!".to_string(),
             }),
-            Object::Mutable(t) => Ok(t.borrow_mut()),
+            ValueReference::Mutable(t) => Ok(t.borrow_mut()),
         }
     }
 }
@@ -532,7 +535,7 @@ pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     String(String),
     Datum(Box<Statement>),
     Procedure(Procedure<R, E>),
-    Vector(Object<Vec<Value<R, E>>>),
+    Vector(ValueReference<Vec<Value<R, E>>>),
     List(LinkedList<Value<R, E>>),
     Void,
 }
@@ -546,7 +549,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
         match_expect_type!(self, Value::Number(Number::Integer(i)) => i, "integer")
     }
 
-    pub fn expect_vector(self) -> Result<Object<Vec<Value<R, E>>>> {
+    pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R, E>>>> {
         match_expect_type!(self, Value::Vector(vector) => vector, "vector")
     }
 }
@@ -750,7 +753,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 for expr in vector {
                     values.push(Self::eval_expression(expr, env)?);
                 }
-                Value::Vector(Object::Immutable(values))
+                Value::Vector(ValueReference::new_immutable(values))
             }
             ExpressionBody::Character(c) => Value::Character(*c),
             ExpressionBody::String(string) => Value::String(string.clone()),
