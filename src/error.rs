@@ -12,12 +12,12 @@ pub enum ErrorType {
     Logic,
 }
 #[derive(Debug, Clone)]
-pub struct Located<T: PartialEq + Display> {
+pub struct Located<T: PartialEq> {
     pub data: T,
     pub location: Option<[u32; 2]>,
 }
 
-impl<T: PartialEq + Display> Located<T> {
+impl<T: PartialEq> Located<T> {
     pub fn from_data(data: T) -> Self {
         Self {
             data,
@@ -31,7 +31,7 @@ impl<T: PartialEq + Display> Located<T> {
     }
 }
 
-impl<T: PartialEq + Display> PartialEq for Located<T> {
+impl<T: PartialEq> PartialEq for Located<T> {
     fn eq(&self, other: &Self) -> bool {
         self.data == other.data
     }
@@ -42,6 +42,7 @@ impl<T: PartialEq + Display> Display for Located<T> {
         self.data.fmt(f)
     }
 }
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct SchemeError {
     pub category: ErrorType,
@@ -59,6 +60,16 @@ impl Display for SchemeError {
             ErrorType::Logic => write!(f, "error: {}", self.message),
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn convert_located<T: PartialEq>(datas: Vec<T>) -> Vec<Located<T>> {
+    datas.into_iter().map(|d| Located::from_data(d)).collect()
+}
+
+#[cfg(test)]
+pub fn l<T: PartialEq>(data: T) -> Located<T> {
+    Located::from_data(data)
 }
 
 macro_rules! invalid_token {

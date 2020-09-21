@@ -3,8 +3,8 @@ use crate::lexer::TokenData;
 use crate::{error::*, lexer::Token};
 use fmt::Display;
 use itertools::join;
-use std::fmt;
-use std::iter::{Iterator, Peekable};
+use std::iter::{repeat, Iterator, Peekable};
+use std::{fmt, iter::FromIterator};
 
 type Result<T> = std::result::Result<T, SchemeError>;
 pub type ParseResult = Result<Option<(Statement, Option<[u32; 2]>)>>;
@@ -18,20 +18,6 @@ pub enum Statement {
     ImportDeclaration(Vec<ImportSet>),
     Definition(Definition),
     Expression(Expression),
-}
-
-impl fmt::Display for Statement {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Statement::ImportDeclaration(imports) => write!(
-                f,
-                "(import {})",
-                join(imports.iter().map(|i| format!("{}", i)), " ")
-            ),
-            Statement::Definition(def) => write!(f, "{}", def),
-            Statement::Expression(expr) => write!(f, "{}", expr),
-        }
-    }
 }
 
 impl Into<Statement> for Expression {
@@ -50,13 +36,6 @@ impl Into<Statement> for Definition {
 pub struct DefinitionBody(pub String, pub Expression);
 
 pub type Definition = Located<DefinitionBody>;
-
-impl fmt::Display for DefinitionBody {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "(define {} {})", self.0, self.1)
-    }
-}
-
 pub type ImportSet = Located<ImportSetBody>;
 
 #[derive(PartialEq, Debug, Clone)]
@@ -66,23 +45,6 @@ pub enum ImportSetBody {
     Except(Box<ImportSet>, Vec<String>),
     Prefix(Box<ImportSet>, String),
     Rename(Box<ImportSet>, Vec<(String, String)>),
-}
-
-impl fmt::Display for ImportSetBody {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Direct(s) => write!(f, "{}", s),
-            Self::Only(lib, names) => write!(f, "(only {} {}", lib, names.join(" ")),
-            Self::Except(lib, names) => write!(f, "(except {} {}", lib, names.join(" ")),
-            Self::Prefix(lib, prefix) => write!(f, "(prefix {} {}", lib, prefix),
-            Self::Rename(lib, rename) => write!(
-                f,
-                "({} {})",
-                lib,
-                join(rename.iter().map(|(a, b)| format!("{} {}", a, b)), " ")
-            ),
-        }
-    }
 }
 
 pub type Expression = Located<ExpressionBody>;
@@ -95,12 +57,14 @@ pub enum ExpressionBody {
     Rational(i32, u32),
     Character(char),
     String(String),
+    Period,
+    List(Vec<Expression>),
     Vector(Vec<Expression>),
     Assignment(String, Box<Expression>),
     Procedure(SchemeProcedure),
     ProcedureCall(Box<Expression>, Vec<Expression>),
     Conditional(Box<(Expression, Expression, Option<Expression>)>),
-    Datum(Box<Statement>),
+    Quote(Box<Expression>),
 }
 
 // external representation, code as data
@@ -109,22 +73,37 @@ impl fmt::Display for ExpressionBody {
         match self {
             Self::Identifier(s) => write!(f, "{}", s),
             Self::Integer(n) => write!(f, "{}", n),
-            Self::Real(n) => write!(f, "{:?}", n),
+            Self::Real(n) => write!(f, "{:?}", n.parse::<f64>().unwrap()),
             Self::Rational(a, b) => write!(f, "{}/{}", a, b),
-            Self::Vector(vector) => write!(f, "({})", join_displayable(vector)),
-            Self::Assignment(name, value) => write!(f, "(set! {} {})", name, value),
+            Self::Period => write!(f, "."),
+            Self::List(list) => write!(
+                f,
+                "({})",
+                join_displayable(list.into_iter().map(|e| &e.data))
+            ),
+            Self::Vector(vector) => write!(
+                f,
+                "#({})",
+                join_displayable(vector.into_iter().map(|e| &e.data))
+            ),
+            Self::Assignment(name, value) => write!(f, "(set! {} {})", name, value.data),
             Self::Procedure(p) => write!(f, "{}", p),
-            Self::ProcedureCall(op, args) => write!(f, "({} {})", op, join_displayable(args)),
+            Self::ProcedureCall(op, args) => write!(
+                f,
+                "({} {})",
+                op.data,
+                join_displayable(args.into_iter().map(|e| &e.data))
+            ),
             Self::Conditional(cond) => {
                 let (test, consequent, alternative) = &cond.as_ref();
                 match alternative {
-                    Some(alt) => write!(f, "({} {}{})", test, consequent, alt),
-                    None => write!(f, "({} {})", test, consequent),
+                    Some(alt) => write!(f, "({} {}{})", test.data, consequent.data, alt.data),
+                    None => write!(f, "({} {})", test.data, consequent.data),
                 }
             }
             Self::Character(c) => write!(f, "#\\{}", c),
             Self::String(ref s) => write!(f, "\"{}\"", s),
-            Self::Datum(datum) => write!(f, "{}", datum),
+            Self::Quote(datum) => write!(f, "'{}", datum.data),
             Self::Boolean(true) => write!(f, "#t"),
             Self::Boolean(false) => write!(f, "#f"),
         }
@@ -164,14 +143,8 @@ pub struct SchemeProcedure(
 
 impl fmt::Display for SchemeProcedure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let SchemeProcedure(formals, definitions, expressions) = self;
-        write!(
-            f,
-            "(lambda {} {}{})",
-            formals,
-            [join_displayable(definitions), " ".to_string()].concat(),
-            join_displayable(expressions)
-        )
+        let SchemeProcedure(formals, ..) = self;
+        write!(f, "(lambda {})", formals,)
     }
 }
 
@@ -235,6 +208,16 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         ..
                     }) => match ident.as_str() {
                         "lambda" => self.lambda()?.into(),
+                        "quote" => {
+                            self.advance(2)?;
+                            let quoted = self.quote()?;
+                            match self.advance(1)?.take().map(|t| t.data) {
+                                Some(TokenData::RightParen) => (),
+                                Some(o) => syntax_error!(self.location, "expect ), got {}", o),
+                                None => syntax_error!(self.location, "unclosed quotation!"),
+                            }
+                            quoted.into()
+                        }
                         "define" => self.definition()?.into(),
                         "set!" => self.assginment()?.into(),
                         "import" => self.import_declaration()?.into(),
@@ -259,11 +242,12 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     location,
                 }
                 .into(),
-                TokenData::Quote => Expression {
-                    data: ExpressionBody::Datum(Box::new(match self.parse()? {
-                        Some(statement) => statement,
-                        None => syntax_error!(location, "expect something to be quoted!"),
-                    })),
+                TokenData::Quote => {
+                    self.advance(1)?;
+                    self.quote()?.into()
+                }
+                TokenData::Period => Expression {
+                    data: ExpressionBody::Period,
                     location,
                 }
                 .into(),
@@ -327,25 +311,30 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         }
     }
 
-    fn collect<T>(&mut self, get_element: fn(&mut Self) -> Result<T>) -> Result<Vec<T>>
+    fn collect<T, C: FromIterator<T>>(
+        &mut self,
+        get_element: fn(&mut Self) -> Result<T>,
+    ) -> Result<C>
     where
         T: std::fmt::Debug,
     {
-        let mut collection = vec![];
-        loop {
-            match self.peek_next_token()?.map(|t| &t.data) {
+        let collection: Result<C> = repeat(())
+            .map(|_| match self.peek_next_token()?.map(|t| &t.data) {
                 Some(TokenData::RightParen) => {
                     self.advance(1)?;
-                    break Ok(collection);
+                    Ok(None)
                 }
                 None => syntax_error!(self.location, "unexpect end of input"),
                 _ => {
                     self.advance(1)?;
-                    let ele = get_element(self)?;
-                    collection.push(ele);
+                    Some(get_element(self)).transpose()
                 }
-            }
-        }
+            })
+            .map(|e| e.transpose())
+            .take_while(|e| e.is_some())
+            .map(|e| e.unwrap())
+            .collect();
+        collection
     }
 
     fn vector(&mut self) -> Result<Expression> {
@@ -381,6 +370,28 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         }
     }
 
+    fn quote(&mut self) -> Result<Expression> {
+        let inner = self.datum()?;
+        Ok(Expression {
+            data: ExpressionBody::Quote(Box::new(inner)),
+            location: self.location,
+        })
+    }
+
+    fn datum(&mut self) -> Result<Expression> {
+        Ok(match self.current.as_ref().map(|t| &t.data) {
+            Some(TokenData::LeftParen) => {
+                let seq: Vec<_> = self.collect(Self::datum)?;
+                Expression {
+                    data: ExpressionBody::List(seq),
+                    location: self.location,
+                }
+            }
+            None => syntax_error!(self.location, "expect a literal"),
+            _ => self.parse_current_expression()?,
+        })
+    }
+
     fn lambda(&mut self) -> Result<Expression> {
         let location = self.location;
         let mut formals = ParameterFormals::new();
@@ -395,7 +406,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 
     fn procedure_body(&mut self, formals: ParameterFormals) -> Result<Expression> {
-        let statements = self.collect(Self::parse_current)?;
+        let statements: Vec<_> = self.collect(Self::parse_current)?;
         let mut definitions = vec![];
         let mut expressions = vec![];
         for statement in statements {
@@ -645,13 +656,8 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
 }
 
 #[cfg(test)]
-pub(crate) fn convert_located<T: PartialEq + Display>(datas: Vec<T>) -> Vec<Located<T>> {
-    datas.into_iter().map(|d| Located::from_data(d)).collect()
-}
-
-#[cfg(test)]
 pub fn simple_procedure(formals: ParameterFormals, expression: Expression) -> Expression {
-    Expression::from_data(ExpressionBody::Procedure(SchemeProcedure(
+    l(ExpressionBody::Procedure(SchemeProcedure(
         formals,
         vec![],
         vec![expression],
@@ -740,8 +746,8 @@ fn vector() -> Result<()> {
     assert_eq!(
         ast,
         expr_body_to_statement(ExpressionBody::Vector(vec![
-            Expression::from_data(ExpressionBody::Integer(1)),
-            Expression::from_data(ExpressionBody::Boolean(false))
+            l(ExpressionBody::Integer(1)),
+            l(ExpressionBody::Boolean(false))
         ]))
     );
     Ok(())
@@ -774,13 +780,11 @@ fn procedure_call() -> Result<()> {
     assert_eq!(
         ast,
         expr_body_to_statement(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from_data(ExpressionBody::Identifier(
-                "+".to_string()
-            ))),
+            Box::new(l(ExpressionBody::Identifier("+".to_string()))),
             vec![
-                Expression::from_data(ExpressionBody::Integer(1)),
-                Expression::from_data(ExpressionBody::Integer(2)),
-                Expression::from_data(ExpressionBody::Integer(3)),
+                l(ExpressionBody::Integer(1)),
+                l(ExpressionBody::Integer(2)),
+                l(ExpressionBody::Integer(3)),
             ]
         ))
     );
@@ -824,7 +828,7 @@ fn definition() -> Result<()> {
                 ast,
                 def_body_to_statement(DefinitionBody(
                     "a".to_string(),
-                    Expression::from_data(ExpressionBody::Integer(1))
+                    l(ExpressionBody::Integer(1))
                 ))
             );
         }
@@ -852,13 +856,11 @@ fn definition() -> Result<()> {
                     "add".to_string(),
                     simple_procedure(
                         ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
-                        Expression::from_data(ExpressionBody::ProcedureCall(
-                            Box::new(Expression::from_data(ExpressionBody::Identifier(
-                                "+".to_string()
-                            ))),
+                        l(ExpressionBody::ProcedureCall(
+                            Box::new(l(ExpressionBody::Identifier("+".to_string()))),
                             vec![
-                                Expression::from_data(ExpressionBody::Identifier("x".to_string())),
-                                Expression::from_data(ExpressionBody::Identifier("y".to_string())),
+                                l(ExpressionBody::Identifier("x".to_string())),
+                                l(ExpressionBody::Identifier("y".to_string())),
                             ]
                         ))
                     )
@@ -885,7 +887,7 @@ fn definition() -> Result<()> {
                     "add".to_string(),
                     simple_procedure(
                         ParameterFormals(vec![], Some("x".to_string())),
-                        Expression::from_data(ExpressionBody::Identifier("x".to_string()))
+                        l(ExpressionBody::Identifier("x".to_string()))
                     )
                 ))
             )
@@ -912,19 +914,12 @@ fn nested_procedure_call() -> Result<()> {
     assert_eq!(
         ast,
         expr_body_to_statement(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from_data(ExpressionBody::Identifier(
-                "+".to_string()
-            ))),
+            Box::new(l(ExpressionBody::Identifier("+".to_string()))),
             vec![
-                Expression::from_data(ExpressionBody::Integer(1)),
-                Expression::from_data(ExpressionBody::ProcedureCall(
-                    Box::new(Expression::from_data(ExpressionBody::Identifier(
-                        "-".to_string()
-                    ))),
-                    vec![
-                        Expression::from_data(ExpressionBody::Integer(2)),
-                        Expression::from_data(ExpressionBody::Integer(3))
-                    ]
+                l(ExpressionBody::Integer(1)),
+                l(ExpressionBody::ProcedureCall(
+                    Box::new(l(ExpressionBody::Identifier("-".to_string()))),
+                    vec![l(ExpressionBody::Integer(2)), l(ExpressionBody::Integer(3))]
                 )),
             ]
         ))
@@ -955,13 +950,11 @@ fn lambda() -> Result<()> {
             ast,
             Some(Statement::Expression(simple_procedure(
                 ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
-                Expression::from_data(ExpressionBody::ProcedureCall(
-                    Box::new(Expression::from_data(ExpressionBody::Identifier(
-                        "+".to_string()
-                    ))),
+                l(ExpressionBody::ProcedureCall(
+                    Box::new(l(ExpressionBody::Identifier("+".to_string()))),
                     vec![
-                        Expression::from_data(ExpressionBody::Identifier("x".to_string())),
-                        Expression::from_data(ExpressionBody::Identifier("y".to_string()))
+                        l(ExpressionBody::Identifier("x".to_string())),
+                        l(ExpressionBody::Identifier("y".to_string()))
                     ]
                 ))
             )))
@@ -991,24 +984,22 @@ fn lambda() -> Result<()> {
         let ast = parser.parse()?;
         assert_eq!(
             ast,
-            Some(Statement::Expression(Expression::from_data(
-                ExpressionBody::Procedure(SchemeProcedure(
+            Some(Statement::Expression(l(ExpressionBody::Procedure(
+                SchemeProcedure(
                     ParameterFormals(vec!["x".to_string()], None),
                     vec![Definition::from_data(DefinitionBody(
                         "y".to_string(),
-                        Expression::from_data(ExpressionBody::Integer(1))
+                        l(ExpressionBody::Integer(1))
                     ))],
-                    vec![Expression::from_data(ExpressionBody::ProcedureCall(
-                        Box::new(Expression::from_data(ExpressionBody::Identifier(
-                            "+".to_string()
-                        ))),
+                    vec![l(ExpressionBody::ProcedureCall(
+                        Box::new(l(ExpressionBody::Identifier("+".to_string()))),
                         vec![
-                            Expression::from_data(ExpressionBody::Identifier("x".to_string())),
-                            Expression::from_data(ExpressionBody::Identifier("y".to_string()))
+                            l(ExpressionBody::Identifier("x".to_string())),
+                            l(ExpressionBody::Identifier("y".to_string()))
                         ]
                     ))]
-                ))
-            )))
+                )
+            ))))
         );
     }
 
@@ -1058,21 +1049,19 @@ fn lambda() -> Result<()> {
         let ast = parser.parse()?;
         assert_eq!(
             ast,
-            Some(Statement::Expression(Expression::from_data(
-                ExpressionBody::Procedure(SchemeProcedure(
+            Some(Statement::Expression(l(ExpressionBody::Procedure(
+                SchemeProcedure(
                     ParameterFormals(vec!["x".to_string()], Some("y".to_string())),
                     vec![],
-                    vec![Expression::from_data(ExpressionBody::ProcedureCall(
-                        Box::new(Expression::from_data(ExpressionBody::Identifier(
-                            "+".to_string()
-                        ))),
+                    vec![l(ExpressionBody::ProcedureCall(
+                        Box::new(l(ExpressionBody::Identifier("+".to_string()))),
                         vec![
-                            Expression::from_data(ExpressionBody::Identifier("x".to_string())),
-                            Expression::from_data(ExpressionBody::Identifier("y".to_string()))
+                            l(ExpressionBody::Identifier("x".to_string())),
+                            l(ExpressionBody::Identifier("y".to_string()))
                         ]
                     ))]
-                ))
-            )))
+                )
+            ))))
         );
     }
 
@@ -1092,13 +1081,13 @@ fn conditional() -> Result<()> {
     let mut parser = token_stream_to_parser(tokens.into_iter());
     assert_eq!(
         parser.parse()?,
-        Some(Statement::Expression(Expression::from_data(
-            ExpressionBody::Conditional(Box::new((
-                Expression::from_data(ExpressionBody::Boolean(true)),
-                Expression::from_data(ExpressionBody::Integer(1)),
-                Some(Expression::from_data(ExpressionBody::Integer(2)))
-            )))
-        )))
+        Some(Statement::Expression(l(ExpressionBody::Conditional(
+            Box::new((
+                l(ExpressionBody::Boolean(true)),
+                l(ExpressionBody::Integer(1)),
+                Some(l(ExpressionBody::Integer(2)))
+            ))
+        ))))
     );
     assert_eq!(parser.parse()?, None);
     Ok(())
@@ -1149,6 +1138,47 @@ fn import_declaration() -> Result<()> {
                     vec![("old".to_string(), "new".to_string())]
                 )
             ])))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn quotes() -> Result<()> {
+    // symbol + list
+    {
+        let tokens = convert_located(vec![
+            TokenData::Quote,
+            TokenData::Integer(1),
+            TokenData::Quote,
+            TokenData::Identifier("a".to_string()),
+            TokenData::Quote,
+            TokenData::LeftParen,
+            TokenData::Integer(1),
+            TokenData::RightParen,
+            TokenData::Quote,
+            TokenData::VecConsIntro,
+            TokenData::Integer(1),
+            TokenData::RightParen,
+        ]);
+        let parser = token_stream_to_parser(tokens.into_iter());
+        let asts = parser.collect::<Result<Vec<_>>>()?;
+        assert_eq!(
+            asts,
+            vec![
+                Statement::Expression(l(ExpressionBody::Quote(Box::new(l(
+                    ExpressionBody::Integer(1)
+                ))))),
+                Statement::Expression(l(ExpressionBody::Quote(Box::new(l(
+                    ExpressionBody::Identifier("a".to_string())
+                ))))),
+                Statement::Expression(l(ExpressionBody::Quote(Box::new(l(ExpressionBody::List(
+                    vec![l(ExpressionBody::Integer(1))]
+                )))))),
+                Statement::Expression(l(ExpressionBody::Quote(Box::new(l(
+                    ExpressionBody::Vector(vec![l(ExpressionBody::Integer(1))])
+                ))))),
+            ]
         );
     }
     Ok(())

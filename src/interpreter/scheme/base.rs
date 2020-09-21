@@ -3,6 +3,46 @@ use crate::interpreter::*;
 use crate::parser::ParameterFormals;
 use std::collections::HashMap;
 
+fn car<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let mut iter = arguments.into_iter();
+    match iter.next() {
+        Some(Value::Pair(list)) => Ok(list.car.clone()),
+        _ => logic_error!("car target is not a list/pair"),
+    }
+}
+
+fn cdr<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let mut iter = arguments.into_iter();
+    match iter.next() {
+        Some(Value::Pair(list)) => Ok(list.cdr.clone()),
+        _ => logic_error!("cdr target is not a list/pair"),
+    }
+}
+
+fn cons<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let mut iter = arguments.into_iter();
+    match (iter.next(), iter.next()) {
+        (Some(car), Some(cdr)) => Ok(Value::Pair(Box::new(Pair { car, cdr }))),
+        _ => unreachable!(),
+    }
+}
+
+fn ispair<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let arg = arguments.into_iter().next().unwrap();
+    match arg {
+        Value::Pair(_) => Ok(Value::Boolean(true)),
+        _ => Ok(Value::Boolean(false)),
+    }
+}
+
 fn add<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
@@ -403,6 +443,15 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 
     vec![
+        function_mapping!("car", vec!["pair".to_string()], None, car),
+        function_mapping!("cdr", vec!["pair".to_string()], None, cdr),
+        function_mapping!(
+            "cons",
+            vec!["car".to_string(), "cdr".to_string()],
+            None,
+            cons
+        ),
+        function_mapping!("pair?", vec!["obj".to_string()], None, ispair),
         function_mapping!("+", vec![], Some("x".to_string()), add),
         function_mapping!("-", vec![], Some("x".to_string()), sub),
         function_mapping!("*", vec![], Some("x".to_string()), mul),

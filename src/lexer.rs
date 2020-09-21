@@ -133,7 +133,15 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                     },
                     None => Ok(None),
                 },
-                '.' => self.percular_identifier(),
+                '.' => match self.peekable_char_stream.peek() {
+                    Some(c) => match c {
+                        ' ' | '\t' | '\n' | '\r' | '(' | ')' | '"' | ';' | '|' => {
+                            Ok(Some(TokenData::Period))
+                        }
+                        _ => self.percular_identifier(),
+                    },
+                    None => Ok(Some(TokenData::Period)),
+                },
                 '+' | '-' => match self.peekable_char_stream.peek() {
                     Some('0'..='9') => self.number(),
                     Some('.') => self.number(),
@@ -277,10 +285,7 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                     '.' => self.dot_subsequent(&mut identifier_str)?,
                     _ => (),
                 }
-                match identifier_str.as_str() {
-                    "." => Ok(Some(TokenData::Period)),
-                    _ => Ok(Some(TokenData::Identifier(identifier_str))),
-                }
+                Ok(Some(TokenData::Identifier(identifier_str)))
             }
             None => Ok(None),
         }
@@ -509,6 +514,11 @@ fn identifier() -> Result<()> {
         ]
     );
 
+    Ok(())
+}
+
+fn period() -> Result<()> {
+    assert_eq!(tokenize(".")?, vec![TokenData::Period]);
     Ok(())
 }
 

@@ -6,6 +6,7 @@ use std::io::Write;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 
+
 fn check_bracket_closed(chars: impl Iterator<Item = char>) -> bool {
     let mut count = 0;
     let mut in_comment = false;
