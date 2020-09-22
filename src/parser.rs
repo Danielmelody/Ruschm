@@ -338,7 +338,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 
     fn vector(&mut self) -> Result<Expression> {
-        let collection = self.collect(Self::parse_current_expression)?;
+        let collection = self.collect(Self::datum)?;
         Ok(self.locate(ExpressionBody::Vector(collection)))
     }
 
@@ -384,6 +384,13 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                 let seq: Vec<_> = self.collect(Self::datum)?;
                 Expression {
                     data: ExpressionBody::List(seq),
+                    location: self.location,
+                }
+            }
+            Some(TokenData::VecConsIntro) => {
+                let seq: Vec<_> = self.collect(Self::datum)?;
+                Expression {
+                    data: ExpressionBody::Vector(seq),
                     location: self.location,
                 }
             }
@@ -1144,7 +1151,7 @@ fn import_declaration() -> Result<()> {
 }
 
 #[test]
-fn quotes() -> Result<()> {
+fn literals() -> Result<()> {
     // symbol + list
     {
         let tokens = convert_located(vec![
@@ -1154,6 +1161,9 @@ fn quotes() -> Result<()> {
             TokenData::Identifier("a".to_string()),
             TokenData::Quote,
             TokenData::LeftParen,
+            TokenData::Integer(1),
+            TokenData::RightParen,
+            TokenData::VecConsIntro,
             TokenData::Integer(1),
             TokenData::RightParen,
             TokenData::Quote,
@@ -1175,6 +1185,9 @@ fn quotes() -> Result<()> {
                 Statement::Expression(l(ExpressionBody::Quote(Box::new(l(ExpressionBody::List(
                     vec![l(ExpressionBody::Integer(1))]
                 )))))),
+                Statement::Expression(l(ExpressionBody::Vector(vec![l(ExpressionBody::Integer(
+                    1
+                ))]))),
                 Statement::Expression(l(ExpressionBody::Quote(Box::new(l(
                     ExpressionBody::Vector(vec![l(ExpressionBody::Integer(1))])
                 ))))),
