@@ -1530,12 +1530,12 @@ fn datum_literal() -> Result<()> {
     assert_eq!(
         Interpreter::eval_expression(
             &l(ExpressionBody::Quote(Box::new(l(ExpressionBody::Vector(
-                vec![l(ExpressionBody::Integer(1),)]
+                vec![l(ExpressionBody::Identifier("a".to_string()),)]
             ))))),
             &interpreter.env,
         )?,
-        Value::Vector(ValueReference::new_immutable(vec![Value::Number(
-            Number::Integer(1)
+        Value::Vector(ValueReference::new_immutable(vec![Value::Symbol(
+            "a".to_string()
         )]))
     );
     Ok(())
