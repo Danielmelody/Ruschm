@@ -554,6 +554,9 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R, E>>>> {
         match_expect_type!(self, Value::Vector(vector) => vector, "vector")
     }
+    pub fn expect_list_or_pair(self) -> Result<Pair<R, E>> {
+        match_expect_type!(self, Value::Pair(list) => *list, "list/pair")
+    }
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> fmt::Display for Value<R, E> {
@@ -1531,7 +1534,9 @@ fn datum_literal() -> Result<()> {
             ))))),
             &interpreter.env,
         )?,
-        Value::Vector(vec![Value::Number(Number::Integer(1))])
+        Value::Vector(ValueReference::new_immutable(vec![Value::Number(
+            Number::Integer(1)
+        )]))
     );
     Ok(())
 }

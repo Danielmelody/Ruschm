@@ -7,20 +7,14 @@ fn car<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
-    match iter.next() {
-        Some(Value::Pair(list)) => Ok(list.car.clone()),
-        _ => logic_error!("car target is not a list/pair"),
-    }
+    Ok(iter.next().unwrap().expect_list_or_pair()?.car)
 }
 
 fn cdr<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
-    match iter.next() {
-        Some(Value::Pair(list)) => Ok(list.cdr.clone()),
-        _ => logic_error!("cdr target is not a list/pair"),
-    }
+    Ok(iter.next().unwrap().expect_list_or_pair()?.cdr)
 }
 
 fn cons<R: RealNumberInternalTrait, E: IEnvironment<R>>(
