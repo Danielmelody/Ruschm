@@ -39,6 +39,69 @@ macro_rules! value_test {
     };
 }
 
+fn eq<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    let mut iter = arguments.into_iter();
+    let a = iter.next().unwrap();
+    let b = iter.next().unwrap();
+    match (&a, &b) {
+        (Value::Vector(a), Value::Vector(b)) => Ok(Value::Boolean(a.ptr_eq(b))),
+        (Value::Pair(a), Value::Pair(b)) => Ok(Value::Boolean(
+            a.as_ref() as *const Pair<R, E> == b.as_ref() as *const Pair<R, E>,
+        )),
+        (Value::Number(a), Value::Number(b)) => Ok(Value::Boolean(a.exact_eq(b))),
+        _ => Ok(Value::Boolean(a == b)),
+    }
+}
+
+#[test]
+fn buildin_eq() {
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
+            Value::Number(Number::Integer(1)),
+            Value::Number(Number::Integer(1)),
+        ];
+        assert_eq!(eq(arguments), Ok(Value::Boolean(true)));
+    }
+
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
+            Value::Pair(Box::new(Pair::new(
+                Value::Character('a'),
+                Value::Character('b'),
+            ))),
+            Value::Pair(Box::new(Pair::new(
+                Value::Character('a'),
+                Value::Character('b'),
+            ))),
+        ];
+        assert_eq!(eq(arguments), Ok(Value::Boolean(false)));
+    }
+
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
+            Value::Vector(ValueReference::new_immutable(vec![Value::Character('a')])),
+            Value::Vector(ValueReference::new_immutable(vec![Value::Character('a')])),
+        ];
+        assert_eq!(eq(arguments), Ok(Value::Boolean(false)));
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
+            Value::Number(Number::Integer(1)),
+            Value::Number(Number::Integer(1)),
+        ];
+        assert_eq!(eq(arguments), Ok(Value::Boolean(true)));
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
+            Value::Number(Number::Integer(1)),
+            Value::Number(Number::Rational(1, 1)),
+        ];
+        assert_eq!(eq(arguments), Ok(Value::Boolean(false)));
+    }
+}
+
 fn add<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
@@ -645,6 +708,12 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
     vec![
         function_mapping!("car", vec!["pair".to_string()], None, car),
         function_mapping!("cdr", vec!["pair".to_string()], None, cdr),
+        function_mapping!(
+            "eq?",
+            vec!["obj1".to_string(), "obj2".to_string()],
+            None,
+            eq
+        ),
         function_mapping!(
             "cons",
             vec!["car".to_string(), "cdr".to_string()],

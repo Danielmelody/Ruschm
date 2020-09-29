@@ -11,6 +11,12 @@ pub struct Pair<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub cdr: Value<R, E>,
 }
 
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Pair<R, E> {
+    pub fn new(car: Value<R, E>, cdr: Value<R, E>) -> Self {
+        Self { car, cdr }
+    }
+}
+
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Pair<R, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({} ", self.car)?;

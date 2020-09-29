@@ -31,7 +31,6 @@ pub enum Number<R: RealNumberInternalTrait> {
     Integer(i32),
     Real(R),
     Rational(i32, i32),
-    // _marker: PhantomData<E>,
 }
 
 impl<R: RealNumberInternalTrait> fmt::Display for Number<R> {
@@ -44,6 +43,18 @@ impl<R: RealNumberInternalTrait> fmt::Display for Number<R> {
     }
 }
 
+impl<R: RealNumberInternalTrait> Number<R> {
+    fn exact_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Number::Integer(a), Number::Integer(b)) => a.eq(&b),
+            (Number::Rational(a1, b1), Number::Rational(a2, b2)) => (a1 * b2).eq(&(b1 * a2)),
+            (Number::Real(a), Number::Real(b)) => a.eq(&b),
+            _ => false,
+        }
+    }
+}
+
+// in the sense of '=', not eq?, eqv?, nor equal?
 impl<R: RealNumberInternalTrait> PartialEq for Number<R> {
     fn eq(&self, other: &Number<R>) -> bool {
         match upcast_oprands((*self, *other)) {
@@ -484,6 +495,14 @@ impl<T> ValueReference<T> {
                 message: "expect a mutable reference, get a immutable reference!".to_string(),
             }),
             ValueReference::Mutable(t) => Ok(t.borrow_mut()),
+        }
+    }
+
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Immutable(a), Self::Immutable(b)) => Rc::ptr_eq(a, b),
+            (Self::Mutable(a), Self::Mutable(b)) => Rc::ptr_eq(a, b),
+            _ => false,
         }
     }
 }
