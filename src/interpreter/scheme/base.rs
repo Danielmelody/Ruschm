@@ -27,14 +27,16 @@ fn cons<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     }
 }
 
-fn ispair<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-    arguments: impl IntoIterator<Item = Value<R, E>>,
-) -> Result<Value<R, E>> {
-    let arg = arguments.into_iter().next().unwrap();
-    match arg {
-        Value::Pair(_) => Ok(Value::Boolean(true)),
-        _ => Ok(Value::Boolean(false)),
-    }
+macro_rules! value_test {
+    ($variant:pat) => {
+        |arguments| {
+            let arg = arguments.into_iter().next().unwrap();
+            match arg {
+                $variant => Ok(Value::Boolean(true)),
+                _ => Ok(Value::Boolean(false)),
+            }
+        }
+    };
 }
 
 fn add<R: RealNumberInternalTrait, E: IEnvironment<R>>(
@@ -628,7 +630,7 @@ fn buildin_min() {
 pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
 ) -> HashMap<String, Value<R, E>> {
     macro_rules! function_mapping {
-        ($ident:tt, $fixed_parameter:expr, $variadic_parameter:expr, $function:tt) => {
+        ($ident:tt, $fixed_parameter:expr, $variadic_parameter:expr, $function:expr) => {
             (
                 $ident.to_owned(),
                 Value::Procedure(Procedure::new_buildin_pure(
@@ -649,7 +651,54 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
             None,
             cons
         ),
-        function_mapping!("pair?", vec!["obj".to_string()], None, ispair),
+        function_mapping!(
+            "boolean?",
+            vec!["obj".to_string()],
+            None,
+            value_test!(Value::Boolean(_))
+        ),
+        function_mapping!(
+            "char?",
+            vec!["obj".to_string()],
+            None,
+            value_test!(Value::Character(_))
+        ),
+        function_mapping!(
+            "number?",
+            vec!["obj".to_string()],
+            None,
+            value_test!(Value::Number(_))
+        ),
+        function_mapping!(
+            "string?",
+            vec!["obj".to_string()],
+            None,
+            value_test!(Value::String(_))
+        ),
+        function_mapping!(
+            "symbol?",
+            vec!["obj".to_string()],
+            None,
+            value_test!(Value::Symbol(_))
+        ),
+        function_mapping!(
+            "pair?",
+            vec!["obj".to_string()],
+            None,
+            value_test!(Value::Pair(_))
+        ),
+        function_mapping!(
+            "procedure?",
+            vec!["obj".to_string()],
+            None,
+            value_test!(Value::Procedure(_))
+        ),
+        function_mapping!(
+            "vector?",
+            vec!["obj".to_string()],
+            None,
+            value_test!(Value::Vector(_))
+        ),
         function_mapping!("+", vec![], Some("x".to_string()), add),
         function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
         function_mapping!("*", vec![], Some("x".to_string()), mul),
