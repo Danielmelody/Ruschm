@@ -2,8 +2,8 @@ use crate::error::*;
 use crate::interpreter::scheme;
 #[cfg(test)]
 use crate::interpreter::Interpreter;
-use crate::interpreter::RealNumberInternalTrait;
-use crate::interpreter::Value;
+use crate::values::RealNumberInternalTrait;
+use crate::values::Value;
 use cell::{Ref, RefCell, RefMut, RefVal};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -122,7 +122,7 @@ fn iter_envs() -> Result<(), SchemeError> {
 }
 #[test]
 fn get_mut() -> Result<(), SchemeError> {
-    use crate::interpreter::Number;
+    use crate::values::Number;
     use std::ops::Deref;
     let env = StandardEnv::<f32>::new();
     env.define("x".to_string(), Value::Number(Number::Integer(1)));

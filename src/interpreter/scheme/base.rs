@@ -1,6 +1,7 @@
-use crate::environment::IEnvironment;
 use crate::interpreter::*;
 use crate::parser::ParameterFormals;
+use crate::values::*;
+use crate::{environment::IEnvironment, values::Value};
 use std::collections::HashMap;
 
 fn car<R: RealNumberInternalTrait, E: IEnvironment<R>>(
@@ -39,7 +40,7 @@ macro_rules! value_test {
     };
 }
 
-fn eq<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+fn eqv<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
@@ -50,19 +51,19 @@ fn eq<R: RealNumberInternalTrait, E: IEnvironment<R>>(
         (Value::Pair(a), Value::Pair(b)) => Ok(Value::Boolean(
             a.as_ref() as *const Pair<R, E> == b.as_ref() as *const Pair<R, E>,
         )),
-        (Value::Number(a), Value::Number(b)) => Ok(Value::Boolean(a.exact_eq(b))),
+        (Value::Number(a), Value::Number(b)) => Ok(Value::Boolean(a.exact_eqv(b))),
         _ => Ok(Value::Boolean(a == b)),
     }
 }
 
 #[test]
-fn buildin_eq() {
+fn equivalance_predicate() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(1)),
             Value::Number(Number::Integer(1)),
         ];
-        assert_eq!(eq(arguments), Ok(Value::Boolean(true)));
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(true)));
     }
 
     {
@@ -76,7 +77,7 @@ fn buildin_eq() {
                 Value::Character('b'),
             ))),
         ];
-        assert_eq!(eq(arguments), Ok(Value::Boolean(false)));
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(false)));
     }
 
     {
@@ -84,21 +85,25 @@ fn buildin_eq() {
             Value::Vector(ValueReference::new_immutable(vec![Value::Character('a')])),
             Value::Vector(ValueReference::new_immutable(vec![Value::Character('a')])),
         ];
-        assert_eq!(eq(arguments), Ok(Value::Boolean(false)));
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(false)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(1)),
             Value::Number(Number::Integer(1)),
         ];
-        assert_eq!(eq(arguments), Ok(Value::Boolean(true)));
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(true)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(1)),
             Value::Number(Number::Rational(1, 1)),
         ];
-        assert_eq!(eq(arguments), Ok(Value::Boolean(false)));
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(false)));
+    }
+    {
+        let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::EmptyList, Value::EmptyList];
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(true)));
     }
 }
 
@@ -709,10 +714,10 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
         function_mapping!("car", vec!["pair".to_string()], None, car),
         function_mapping!("cdr", vec!["pair".to_string()], None, cdr),
         function_mapping!(
-            "eq?",
+            "eqv?",
             vec!["obj1".to_string(), "obj2".to_string()],
             None,
-            eq
+            eqv
         ),
         function_mapping!(
             "cons",

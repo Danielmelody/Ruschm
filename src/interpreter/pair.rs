@@ -1,7 +1,6 @@
 use std::{fmt::Display, iter::FromIterator};
 
-use super::{RealNumberInternalTrait, Value};
-use crate::environment::IEnvironment;
+use crate::{environment::IEnvironment, values::RealNumberInternalTrait, values::Value};
 
 // r7rs 6.4. Pairs and lists
 

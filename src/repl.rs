@@ -1,11 +1,10 @@
-use crate::environment::*;
 use crate::interpreter;
+use crate::{environment::*, values::Value};
 use std::io;
 use std::io::Write;
 
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
-
 
 fn check_bracket_closed(chars: impl Iterator<Item = char>) -> bool {
     let mut count = 0;
@@ -49,7 +48,7 @@ pub fn run() {
                         Ok(opt) => {
                             if let Some(value) = opt {
                                 match value {
-                                    interpreter::Value::Void => (),
+                                    Value::Void => (),
                                     _ => println!("{}", value),
                                 }
                             }

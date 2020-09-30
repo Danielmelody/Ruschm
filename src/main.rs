@@ -1,12 +1,4 @@
-#[macro_use]
-mod error;
-mod environment;
-mod interpreter;
-mod lexer;
-mod parser;
-mod repl;
-
-use crate::environment::StandardEnv;
+use ruschm::{environment::StandardEnv, error, interpreter::Interpreter, repl};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::{env, process::exit};
@@ -16,7 +8,7 @@ fn main() -> Result<(), error::SchemeError> {
     Ok(match env::args().skip(1).next() {
         Some(file) => {
             let f = BufReader::new(File::open(file.as_str()).expect("no such file or directory"));
-            let it = interpreter::Interpreter::<f32, StandardEnv<f32>>::new();
+            let it = Interpreter::<f32, StandardEnv<f32>>::new();
             let result = it.eval(f.lines().flat_map(|line| {
                 line.unwrap()
                     .chars()
