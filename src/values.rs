@@ -506,6 +506,7 @@ impl<T> ValueReference<T> {
     }
 }
 
+#[macro_export]
 macro_rules! match_expect_type {
     ($value:expr, $type:pat => $inner: expr, $type_name:expr) => {
         match $value {
