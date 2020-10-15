@@ -565,16 +565,29 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     pub fn expect_number(self) -> Result<Number<R>> {
         match_expect_type!(self, Value::Number(number) => number, "number")
     }
-
     pub fn expect_integer(self) -> Result<i32> {
         match_expect_type!(self, Value::Number(Number::Integer(i)) => i, "integer")
     }
-
+    pub fn expect_real(self) -> Result<R> {
+        match_expect_type!(self, Value::Number(Number::Real(r)) => r, "real")
+    }
     pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R, E>>>> {
         match_expect_type!(self, Value::Vector(vector) => vector, "vector")
     }
     pub fn expect_list_or_pair(self) -> Result<Pair<R, E>> {
         match_expect_type!(self, Value::Pair(list) => *list, "list/pair")
+    }
+    pub fn expect_string(self) -> Result<String> {
+        match_expect_type!(self, Value::String(string) => string, "string")
+    }
+    pub fn expect_symbol(self) -> Result<String> {
+        match_expect_type!(self, Value::Symbol(string) => string, "symbol")
+    }
+    pub fn expect_procedure(self) -> Result<Procedure<R, E>> {
+        match_expect_type!(self, Value::Procedure(procedure) => procedure, "procedure")
+    }
+    pub fn expect_boolean(self) -> Result<bool> {
+        match_expect_type!(self, Value::Boolean(boolean) => boolean, "boolean")
     }
 }
 
