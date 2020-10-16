@@ -730,6 +730,12 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
             eqv
         ),
         function_mapping!(
+            "eq?", // Ruschm is pass-by value now, so that eq? is equivalent to eqv?
+            vec!["obj1".to_string(), "obj2".to_string()],
+            None,
+            eqv
+        ),
+        function_mapping!(
             "cons",
             vec!["car".to_string(), "cdr".to_string()],
             None,
