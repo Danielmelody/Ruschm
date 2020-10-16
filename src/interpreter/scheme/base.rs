@@ -574,8 +574,8 @@ fn newline<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     Ok(Value::Void)
 }
 
-macro_rules! comparision {
-    ($name:tt, $operator:tt) => {
+macro_rules! typed_comparision {
+    ($name:tt, $operator:tt, $expect_type: tt) => {
         fn $name<R: RealNumberInternalTrait, E: IEnvironment<R>>(
                         arguments: impl IntoIterator<Item = Value<R, E>>
         ) -> Result<Value<R, E>> {
@@ -583,9 +583,9 @@ macro_rules! comparision {
             match iter.next() {
                 None => Ok(Value::Boolean(true)),
                 Some(first) => {
-                    let mut last_num = first.expect_number()?;
+                    let mut last_num = first.$expect_type()?;
                     for current in iter {
-                        let current_num = current.expect_number()?;
+                        let current_num = current.$expect_type()?;
                         if !(last_num $operator current_num) {
                             return Ok(Value::Boolean(false));
                         }
@@ -599,11 +599,12 @@ macro_rules! comparision {
     }
 }
 
-comparision!(equals, ==);
-comparision!(greater, >);
-comparision!(greater_equal, >=);
-comparision!(less, <);
-comparision!(less_equal, <=);
+typed_comparision!(equals, ==, expect_number);
+typed_comparision!(greater, >, expect_number);
+typed_comparision!(greater_equal, >=, expect_number);
+typed_comparision!(less, <, expect_number);
+typed_comparision!(less_equal, <=, expect_number);
+typed_comparision!(boolean_equal, <=, expect_boolean);
 
 #[test]
 fn buildin_greater() {
@@ -783,6 +784,12 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
             value_test!(Value::Vector(_))
         ),
         function_mapping!("not", vec!["obj".to_string()], None, not),
+        function_mapping!(
+            "boolean=?",
+            vec![],
+            Some("booleans".to_string()),
+            boolean_equal
+        ),
         function_mapping!("+", vec![], Some("x".to_string()), add),
         function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
         function_mapping!("*", vec![], Some("x".to_string()), mul),
