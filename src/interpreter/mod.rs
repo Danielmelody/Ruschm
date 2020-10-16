@@ -29,10 +29,15 @@ pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn new() -> Self {
-        Self {
+        let interpreter = Self {
             env: Rc::new(E::new()),
             _marker: PhantomData,
-        }
+        };
+
+        interpreter
+            .eval(include_str!("./scheme/base.scm").chars())
+            .unwrap();
+        interpreter
     }
 
     fn apply_scheme_procedure<'a>(
@@ -47,7 +52,6 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         for (param, arg) in formals.0.iter().zip(arg_iter.by_ref()) {
             local_env.define(param.clone(), arg);
         }
-        // let variadic =
         if let Some(variadic) = &formals.1 {
             let list = arg_iter.collect();
             local_env.define(variadic.clone(), list);
@@ -728,16 +732,31 @@ fn closure() -> Result<()> {
 #[test]
 fn condition() -> Result<()> {
     let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    let program = vec![Statement::Expression(Expression::from_data(
-        ExpressionBody::Conditional(Box::new((
-            Expression::from_data(ExpressionBody::Boolean(true)),
-            Expression::from_data(ExpressionBody::Integer(1)),
-            Some(Expression::from_data(ExpressionBody::Integer(2))),
-        ))),
-    ))];
     assert_eq!(
-        interpreter.eval_program(program.iter())?,
+        interpreter.eval_program(
+            vec![Statement::Expression(Expression::from_data(
+                ExpressionBody::Conditional(Box::new((
+                    Expression::from_data(ExpressionBody::Boolean(true)),
+                    Expression::from_data(ExpressionBody::Integer(1)),
+                    Some(Expression::from_data(ExpressionBody::Integer(2))),
+                ))),
+            ))]
+            .iter()
+        )?,
         Some(Value::Number(Number::Integer(1)))
+    );
+    assert_eq!(
+        interpreter.eval_program(
+            vec![Statement::Expression(Expression::from_data(
+                ExpressionBody::Conditional(Box::new((
+                    Expression::from_data(ExpressionBody::Boolean(false)),
+                    Expression::from_data(ExpressionBody::Integer(1)),
+                    Some(Expression::from_data(ExpressionBody::Integer(2))),
+                ))),
+            ))]
+            .iter()
+        )?,
+        Some(Value::Number(Number::Integer(2)))
     );
     Ok(())
 }
