@@ -107,6 +107,15 @@ fn equivalance_predicate() {
     }
 }
 
+fn not<R: RealNumberInternalTrait, E: IEnvironment<R>>(
+    arguments: impl IntoIterator<Item = Value<R, E>>,
+) -> Result<Value<R, E>> {
+    match arguments.into_iter().next().unwrap() {
+        Value::Boolean(false) => Ok(Value::Boolean(true)),
+        _ => Ok(Value::Boolean(false)),
+    }
+}
+
 fn add<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
@@ -773,6 +782,7 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
             None,
             value_test!(Value::Vector(_))
         ),
+        function_mapping!("not", vec!["obj".to_string()], None, not),
         function_mapping!("+", vec![], Some("x".to_string()), add),
         function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
         function_mapping!("*", vec![], Some("x".to_string()), mul),
