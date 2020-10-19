@@ -1,7 +1,8 @@
-use crate::interpreter::*;
-use crate::parser::ParameterFormals;
+use pair::Pair;
+
 use crate::values::*;
-use crate::{environment::IEnvironment, values::Value};
+use crate::{environment::*, interpreter::*};
+use crate::{error::ErrorType, parser::ParameterFormals};
 use std::collections::HashMap;
 
 fn car<R: RealNumberInternalTrait, E: IEnvironment<R>>(

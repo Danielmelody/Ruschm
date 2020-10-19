@@ -1,6 +1,6 @@
 #![allow(dead_code)]
-use crate::lexer::TokenData;
-use crate::{error::*, lexer::Token};
+use crate::parser::lexer::TokenData;
+use crate::{error::*, parser::lexer::Token};
 use fmt::Display;
 use itertools::join;
 use std::iter::{repeat, Iterator, Peekable};
