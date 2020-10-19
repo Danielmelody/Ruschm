@@ -853,93 +853,93 @@ fn procedure_as_data() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn eval_tail_expression() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    {
-        let expression = Expression::from_data(ExpressionBody::Integer(3));
-        assert_eq!(
-            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::Value(Value::Number(Number::Integer(3)))
-        );
-    }
-    {
-        let expression = Expression::from_data(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from_data(ExpressionBody::Identifier(
-                "+".to_string(),
-            ))),
-            vec![
-                Expression::from_data(ExpressionBody::Integer(2)),
-                Expression::from_data(ExpressionBody::Integer(5)),
-            ],
-        ));
-        assert_eq!(
-            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(
-                &Expression::from_data(ExpressionBody::Identifier("+".to_string())),
-                &convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
-                interpreter.env.clone()
-            )
-        );
-    }
-    {
-        let expression = Expression::from_data(ExpressionBody::Conditional(Box::new((
-            Expression::from_data(ExpressionBody::Boolean(true)),
-            Expression::from_data(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from_data(ExpressionBody::Identifier(
-                    "+".to_string(),
-                ))),
-                convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
-            )),
-            None,
-        ))));
-        assert_eq!(
-            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(
-                &Expression::from_data(ExpressionBody::Identifier("+".to_string())),
-                &convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
-                interpreter.env.clone()
-            )
-        );
-    }
-    {
-        let expression = Expression::from_data(ExpressionBody::Conditional(Box::new((
-            Expression::from_data(ExpressionBody::Boolean(false)),
-            Expression::from_data(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from_data(ExpressionBody::Identifier(
-                    "+".to_string(),
-                ))),
-                convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
-            )),
-            Some(Expression::from_data(ExpressionBody::Integer(4))),
-        ))));
-        assert_eq!(
-            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::Value(Value::Number(Number::Integer(4)))
-        );
-    }
-    {
-        let expression = Expression::from_data(ExpressionBody::Conditional(Box::new((
-            Expression::from_data(ExpressionBody::Boolean(false)),
-            Expression::from_data(ExpressionBody::Integer(4)),
-            Some(Expression::from_data(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from_data(ExpressionBody::Identifier(
-                    "+".to_string(),
-                ))),
-                convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
-            ))),
-        ))));
-        assert_eq!(
-            Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(
-                &Expression::from_data(ExpressionBody::Identifier("+".to_string())),
-                &convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
-                interpreter.env.clone()
-            )
-        );
-    }
-    Ok(())
-}
+// #[test]
+// fn eval_tail_expression() -> Result<()> {
+//     let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+//     {
+//         let expression = Expression::from_data(ExpressionBody::Integer(3));
+//         assert_eq!(
+//             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
+//             TailExpressionResult::Value(Value::Number(Number::Integer(3)))
+//         );
+//     }
+//     {
+//         let expression = Expression::from_data(ExpressionBody::ProcedureCall(
+//             Box::new(Expression::from_data(ExpressionBody::Identifier(
+//                 "+".to_string(),
+//             ))),
+//             vec![
+//                 Expression::from_data(ExpressionBody::Integer(2)),
+//                 Expression::from_data(ExpressionBody::Integer(5)),
+//             ],
+//         ));
+//         assert_eq!(
+//             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
+//             TailExpressionResult::TailCall(
+//                 &Expression::from_data(ExpressionBody::Identifier("+".to_string())),
+//                 &convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
+//                 interpreter.env.clone()
+//             )
+//         );
+//     }
+//     {
+//         let expression = Expression::from_data(ExpressionBody::Conditional(Box::new((
+//             Expression::from_data(ExpressionBody::Boolean(true)),
+//             Expression::from_data(ExpressionBody::ProcedureCall(
+//                 Box::new(Expression::from_data(ExpressionBody::Identifier(
+//                     "+".to_string(),
+//                 ))),
+//                 convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
+//             )),
+//             None,
+//         ))));
+//         assert_eq!(
+//             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
+//             TailExpressionResult::TailCall(
+//                 &Expression::from_data(ExpressionBody::Identifier("+".to_string())),
+//                 &convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
+//                 interpreter.env.clone()
+//             )
+//         );
+//     }
+//     {
+//         let expression = Expression::from_data(ExpressionBody::Conditional(Box::new((
+//             Expression::from_data(ExpressionBody::Boolean(false)),
+//             Expression::from_data(ExpressionBody::ProcedureCall(
+//                 Box::new(Expression::from_data(ExpressionBody::Identifier(
+//                     "+".to_string(),
+//                 ))),
+//                 convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
+//             )),
+//             Some(Expression::from_data(ExpressionBody::Integer(4))),
+//         ))));
+//         assert_eq!(
+//             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
+//             TailExpressionResult::Value(Value::Number(Number::Integer(4)))
+//         );
+//     }
+//     {
+//         let expression = Expression::from_data(ExpressionBody::Conditional(Box::new((
+//             Expression::from_data(ExpressionBody::Boolean(false)),
+//             Expression::from_data(ExpressionBody::Integer(4)),
+//             Some(Expression::from_data(ExpressionBody::ProcedureCall(
+//                 Box::new(Expression::from_data(ExpressionBody::Identifier(
+//                     "+".to_string(),
+//                 ))),
+//                 convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
+//             ))),
+//         ))));
+//         assert_eq!(
+//             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
+//             TailExpressionResult::TailCall(
+//                 &Expression::from_data(ExpressionBody::Identifier("+".to_string())),
+//                 &convert_located(vec![ExpressionBody::Integer(2), ExpressionBody::Integer(5)]),
+//                 interpreter.env.clone()
+//             )
+//         );
+//     }
+//     Ok(())
+// }
 
 #[test]
 fn datum_literal() -> Result<()> {
