@@ -3,7 +3,7 @@ use crate::interpreter::scheme;
 #[cfg(test)]
 use crate::interpreter::Interpreter;
 use crate::values::RealNumberInternalTrait;
-use crate::values::Value;
+use crate::values::{DeepCloneWithEnv, Value};
 use cell::{Ref, RefCell, RefMut, RefVal};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -31,6 +31,8 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
         Self: Sized;
 
     fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R, Self>>;
+
+    fn deep_clone(&self) -> Rc<Self>;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -98,6 +100,18 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
             self.definitions.borrow(),
             |definitions| -> DefinitionIter<'b, R, Self> { Box::new(definitions.iter()) },
         )
+    }
+
+    fn deep_clone(&self) -> Rc<Self> {
+        let result = Rc::new(match &self.parent {
+            Some(parent) => Self::new_child(parent.as_ref().deep_clone()),
+            None => Self::new(),
+        });
+        let mut local_definitions = self.iter_local_definitions();
+        for (name, value) in local_definitions.as_mut() {
+            result.define(name.clone(), value.deep_clone_with_env(result.clone()))
+        }
+        result
     }
 }
 

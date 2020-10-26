@@ -388,6 +388,28 @@ fn number_exact() {
 
 pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
 
+pub trait DeepCloneWithEnv<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    fn deep_clone_with_env(&self, env: Rc<E>) -> Self;
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>, T: DeepCloneWithEnv<R, E>>
+    DeepCloneWithEnv<R, E> for Vec<T>
+{
+    fn deep_clone_with_env(&self, env: Rc<E>) -> Self {
+        self.iter()
+            .map(|t| t.deep_clone_with_env(env.clone()))
+            .collect()
+    }
+}
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> DeepCloneWithEnv<R, E> for Pair<R, E> {
+    fn deep_clone_with_env(&self, env: Rc<E>) -> Self {
+        Self::new(
+            self.car.deep_clone_with_env(env.clone()),
+            self.cdr.deep_clone_with_env(env),
+        )
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub enum BuildinProcedurePointer<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Pure(fn(ArgVec<R, E>) -> Result<Value<R, E>>),
@@ -423,6 +445,15 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for BuildinProcedure<
 pub enum Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     User(SchemeProcedure, Rc<E>),
     Buildin(BuildinProcedure<R, E>),
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> DeepCloneWithEnv<R, E> for Procedure<R, E> {
+    fn deep_clone_with_env(&self, env: Rc<E>) -> Self {
+        match self {
+            Procedure::User(scheme_procedure, ..) => Procedure::User(scheme_procedure.clone(), env),
+            other => other.clone(),
+        }
+    }
 }
 
 impl ParameterFormals {}
@@ -502,6 +533,21 @@ impl<T> ValueReference<T> {
             (Self::Immutable(a), Self::Immutable(b)) => Rc::ptr_eq(a, b),
             (Self::Mutable(a), Self::Mutable(b)) => Rc::ptr_eq(a, b),
             _ => false,
+        }
+    }
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>, T: DeepCloneWithEnv<R, E>>
+    DeepCloneWithEnv<R, E> for ValueReference<T>
+{
+    fn deep_clone_with_env(&self, env: Rc<E>) -> Self {
+        match self {
+            ValueReference::Immutable(value) => {
+                ValueReference::Immutable(Rc::new(value.deep_clone_with_env(env)))
+            }
+            ValueReference::Mutable(value) => ValueReference::Mutable(Rc::new(RefCell::new(
+                value.borrow().deep_clone_with_env(env),
+            ))),
         }
     }
 }
@@ -609,6 +655,17 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Value<R, E> {
             ),
             Value::Pair(list) => write!(f, "{}", list),
             Value::EmptyList => write!(f, "()"),
+        }
+    }
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> DeepCloneWithEnv<R, E> for Value<R, E> {
+    fn deep_clone_with_env(&self, env: Rc<E>) -> Self {
+        match self {
+            Self::Procedure(procedure) => Self::Procedure(procedure.deep_clone_with_env(env)),
+            Self::Vector(value_ref) => Self::Vector(value_ref.deep_clone_with_env(env)),
+            Self::Pair(pair) => Self::Pair(Box::new(pair.as_ref().deep_clone_with_env(env))),
+            other => other.clone(),
         }
     }
 }
