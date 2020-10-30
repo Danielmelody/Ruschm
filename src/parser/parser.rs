@@ -3,8 +3,12 @@ use crate::parser::lexer::TokenData;
 use crate::{error::*, parser::lexer::Token};
 use fmt::Display;
 use itertools::join;
+use std::fmt;
 use std::iter::{repeat, Iterator, Peekable};
-use std::{fmt, iter::FromIterator};
+
+use super::{
+    Primitive, SyntaxPattern, SyntaxPatternBody, SyntaxTemplate, SyntaxTemplateBody, Transformer,
+};
 
 type Result<T> = std::result::Result<T, SchemeError>;
 pub type ParseResult = Result<Option<(Statement, Option<[u32; 2]>)>>;
@@ -17,12 +21,19 @@ pub(crate) fn join_displayable(iter: impl IntoIterator<Item = impl fmt::Display>
 pub enum Statement {
     ImportDeclaration(Vec<ImportSet>),
     Definition(Definition),
+    SyntaxDefinition(SyntaxDef),
     Expression(Expression),
 }
 
 impl Into<Statement> for Expression {
     fn into(self) -> Statement {
         Statement::Expression(self)
+    }
+}
+
+impl Into<Statement> for SyntaxDef {
+    fn into(self) -> Statement {
+        Statement::SyntaxDefinition(self)
     }
 }
 
@@ -35,7 +46,11 @@ impl Into<Statement> for Definition {
 #[derive(PartialEq, Debug, Clone)]
 pub struct DefinitionBody(pub String, pub Expression);
 
+#[derive(PartialEq, Debug, Clone)]
+pub struct SyntaxDefBody(pub String, pub Transformer);
+
 pub type Definition = Located<DefinitionBody>;
+pub type SyntaxDef = Located<SyntaxDefBody>;
 pub type ImportSet = Located<ImportSetBody>;
 
 #[derive(PartialEq, Debug, Clone)]
@@ -51,12 +66,7 @@ pub type Expression = Located<ExpressionBody>;
 #[derive(PartialEq, Debug, Clone)]
 pub enum ExpressionBody {
     Identifier(String),
-    Integer(i32),
-    Boolean(bool),
-    Real(String),
-    Rational(i32, u32),
-    Character(char),
-    String(String),
+    Primitive(Primitive),
     Period,
     List(Vec<Expression>),
     Vector(Vec<Expression>),
@@ -67,46 +77,15 @@ pub enum ExpressionBody {
     Quote(Box<Expression>),
 }
 
-// external representation, code as data
-impl fmt::Display for ExpressionBody {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Identifier(s) => write!(f, "{}", s),
-            Self::Integer(n) => write!(f, "{}", n),
-            Self::Real(n) => write!(f, "{:?}", n.parse::<f64>().unwrap()),
-            Self::Rational(a, b) => write!(f, "{}/{}", a, b),
-            Self::Period => write!(f, "."),
-            Self::List(list) => write!(
-                f,
-                "({})",
-                join_displayable(list.into_iter().map(|e| &e.data))
-            ),
-            Self::Vector(vector) => write!(
-                f,
-                "#({})",
-                join_displayable(vector.into_iter().map(|e| &e.data))
-            ),
-            Self::Assignment(name, value) => write!(f, "(set! {} {})", name, value.data),
-            Self::Procedure(p) => write!(f, "{}", p),
-            Self::ProcedureCall(op, args) => write!(
-                f,
-                "({} {})",
-                op.data,
-                join_displayable(args.into_iter().map(|e| &e.data))
-            ),
-            Self::Conditional(cond) => {
-                let (test, consequent, alternative) = &cond.as_ref();
-                match alternative {
-                    Some(alt) => write!(f, "({} {}{})", test.data, consequent.data, alt.data),
-                    None => write!(f, "({} {})", test.data, consequent.data),
-                }
-            }
-            Self::Character(c) => write!(f, "#\\{}", c),
-            Self::String(ref s) => write!(f, "\"{}\"", s),
-            Self::Quote(datum) => write!(f, "'{}", datum.data),
-            Self::Boolean(true) => write!(f, "#t"),
-            Self::Boolean(false) => write!(f, "#f"),
-        }
+impl From<Primitive> for ExpressionBody {
+    fn from(p: Primitive) -> Self {
+        ExpressionBody::Primitive(p)
+    }
+}
+
+impl From<Primitive> for Expression {
+    fn from(p: Primitive) -> Self {
+        ExpressionBody::Primitive(p).into()
     }
 }
 
@@ -177,23 +156,8 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     pub fn parse_current(&mut self) -> Result<Option<Statement>> {
         match self.current.take() {
             Some(Token { data, location }) => Ok(Some(match data {
-                TokenData::Boolean(b) => Expression {
-                    data: ExpressionBody::Boolean(b),
-                    location,
-                }
-                .into(),
-                TokenData::Integer(a) => Expression {
-                    data: ExpressionBody::Integer(a),
-                    location,
-                }
-                .into(),
-                TokenData::Real(a) => Expression {
-                    data: ExpressionBody::Real(a),
-                    location,
-                }
-                .into(),
-                TokenData::Rational(a, b) => Expression {
-                    data: ExpressionBody::Rational(a, b),
+                TokenData::Primitive(p) => Expression {
+                    data: ExpressionBody::Primitive(p),
                     location,
                 }
                 .into(),
@@ -213,12 +177,13 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                             let quoted = self.quote()?;
                             match self.advance(1)?.take().map(|t| t.data) {
                                 Some(TokenData::RightParen) => (),
-                                Some(o) => syntax_error!(self.location, "expect ), got {}", o),
+                                Some(o) => syntax_error!(self.location, "expect , got {}", o),
                                 None => syntax_error!(self.location, "unclosed quotation!"),
                             }
                             quoted.into()
                         }
                         "define" => self.definition()?.into(),
+                        "define-syntax" => self.def_syntax()?.into(),
                         "set!" => self.assginment()?.into(),
                         "import" => self.import_declaration()?.into(),
                         "if" => self.condition()?.into(),
@@ -232,16 +197,6 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                 },
                 TokenData::RightParen => syntax_error!(location, "Unmatched Parentheses!"),
                 TokenData::VecConsIntro => self.vector()?.into(),
-                TokenData::Character(c) => Expression {
-                    data: ExpressionBody::Character(c),
-                    location,
-                }
-                .into(),
-                TokenData::String(s) => Expression {
-                    data: ExpressionBody::String(s),
-                    location,
-                }
-                .into(),
                 TokenData::Quote => {
                     self.advance(1)?;
                     self.quote()?.into()
@@ -273,6 +228,13 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     pub fn parse(&mut self) -> Result<Option<Statement>> {
         self.advance(1)?;
         self.parse_current()
+    }
+
+    fn expression(&mut self) -> Result<Expression> {
+        Ok(match self.parse()? {
+            Some(Statement::Expression(expr)) => expr,
+            _ => syntax_error!(self.location, "expect expression"),
+        })
     }
 
     // we know it will never be RightParen
@@ -311,15 +273,25 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         }
     }
 
-    fn collect<T, C: FromIterator<T>>(
-        &mut self,
+    fn expect_next_nth(&mut self, n: usize, tobe: TokenData) -> Result<()> {
+        let test = self.advance(n)?;
+        match test {
+            Some(Token { data, .. }) if data == &tobe => Ok(()),
+            Some(other) => syntax_error!(other.location, "expect {}, got {}", tobe, other),
+            None => syntax_error!(self.location, "expect {}", tobe),
+        }
+    }
+
+    // a lazy parser combinator to repeat the given parser
+    fn repeat<'a, T>(
+        &'a mut self,
         get_element: fn(&mut Self) -> Result<T>,
-    ) -> Result<C>
+    ) -> impl Iterator<Item = Result<T>> + 'a
     where
-        T: std::fmt::Debug,
+        T: std::fmt::Debug + 'a,
     {
-        let collection: Result<C> = repeat(())
-            .map(|_| match self.peek_next_token()?.map(|t| &t.data) {
+        repeat(())
+            .map(move |_| match self.peek_next_token()?.map(|t| &t.data) {
                 Some(TokenData::RightParen) => {
                     self.advance(1)?;
                     Ok(None)
@@ -333,13 +305,11 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
             .map(|e| e.transpose())
             .take_while(|e| e.is_some())
             .map(|e| e.unwrap())
-            .collect();
-        collection
     }
 
     fn vector(&mut self) -> Result<Expression> {
-        let collection = self.collect(Self::datum)?;
-        Ok(self.locate(ExpressionBody::Vector(collection)))
+        let vec = self.repeat(Self::datum).collect::<Result<_>>()?;
+        Ok(self.locate(ExpressionBody::Vector(vec)))
     }
 
     fn procedure_formals(&mut self) -> Result<ParameterFormals> {
@@ -381,14 +351,14 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     fn datum(&mut self) -> Result<Expression> {
         Ok(match self.current.as_ref().map(|t| &t.data) {
             Some(TokenData::LeftParen) => {
-                let seq: Vec<_> = self.collect(Self::datum)?;
+                let seq = self.repeat(Self::datum).collect::<Result<_>>()?;
                 Expression {
                     data: ExpressionBody::List(seq),
                     location: self.location,
                 }
             }
             Some(TokenData::VecConsIntro) => {
-                let seq: Vec<_> = self.collect(Self::datum)?;
+                let seq = self.repeat(Self::datum).collect::<Result<_>>()?;
                 Expression {
                     data: ExpressionBody::Vector(seq),
                     location: self.location,
@@ -413,22 +383,23 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 
     fn procedure_body(&mut self, formals: ParameterFormals) -> Result<Expression> {
-        let statements: Vec<_> = self.collect(Self::parse_current)?;
+        let body_location = self.location;
+        let statements = self.repeat(Self::parse_current);
         let mut definitions = vec![];
         let mut expressions = vec![];
         for statement in statements {
-            match statement {
+            match statement? {
                 Some(Statement::Definition(def)) => {
                     if expressions.is_empty() {
                         definitions.push(def)
                     } else {
-                        syntax_error!(self.location, "unexpect definition af expression")
+                        syntax_error!(def.location, "unexpect definition af expression")
                     }
                 }
                 Some(Statement::Expression(expr)) => expressions.push(expr),
-                None => syntax_error!(self.location, "lambda body empty"),
+                None => syntax_error!(body_location, "lambda body empty"),
                 _ => syntax_error!(
-                    self.location,
+                    body_location,
                     "procedure body can only contains definition or expression"
                 ),
             }
@@ -444,9 +415,9 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 
     fn import_declaration(&mut self) -> Result<Statement> {
-        self.advance(1)?;
+        self.expect_next_nth(1, TokenData::Identifier("import".to_string()))?;
         Ok(Statement::ImportDeclaration(
-            self.collect(Self::import_set)?,
+            self.repeat(Self::import_set).collect::<Result<_>>()?,
         ))
     }
 
@@ -514,7 +485,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         ImportSet {
                             data: ImportSetBody::Only(
                                 Box::new(self.import_set()?),
-                                self.collect(Self::get_identifier)?,
+                                self.repeat(Self::get_identifier).collect::<Result<_>>()?,
                             ),
                             location,
                         }
@@ -524,7 +495,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         ImportSet {
                             data: ImportSetBody::Except(
                                 Box::new(self.import_set()?),
-                                self.collect(Self::get_identifier)?,
+                                self.repeat(Self::get_identifier).collect::<Result<_>>()?,
                             ),
                             location,
                         }
@@ -541,7 +512,8 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         ImportSet {
                             data: ImportSetBody::Rename(
                                 Box::new(self.import_set()?),
-                                self.collect(Self::get_identifier_pair)?,
+                                self.repeat(Self::get_identifier_pair)
+                                    .collect::<Result<_>>()?,
                             ),
                             location,
                         }
@@ -584,6 +556,206 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
             },
             _ => syntax_error!(location, "define: expect identifier and expression"),
         }
+    }
+
+    fn def_syntax(&mut self) -> Result<SyntaxDef> {
+        let location = self.location;
+        self.advance(2)?;
+        let keyword = self.get_identifier()?;
+        self.expect_next_nth(1, TokenData::LeftParen)?;
+        self.expect_next_nth(1, TokenData::Identifier("syntax-rules".to_string()))?;
+        let (ellipsis, literals) = match self.advance(1)? {
+            Some(Token {
+                data: TokenData::LeftParen,
+                ..
+            }) => (None, {
+                self.repeat(Self::get_identifier).collect::<Result<_>>()?
+            }),
+            Some(Token {
+                data: TokenData::Identifier(ellipsis),
+                ..
+            }) => (Some(ellipsis.clone()), {
+                self.expect_next_nth(1, TokenData::LeftParen)?;
+                self.repeat(Self::get_identifier).collect::<Result<_>>()?
+            }),
+            other => syntax_error!(location, "expect literal (identifier), get {:?}", other),
+        };
+        let rules = self.repeat(Self::syntax_rule).collect::<Result<_>>()?;
+        let syntax = SyntaxDef {
+            data: SyntaxDefBody(
+                keyword,
+                Transformer {
+                    ellipsis,
+                    literals,
+                    rules,
+                },
+            ),
+            location,
+        };
+        self.expect_next_nth(1, TokenData::RightParen)?;
+        Ok(syntax)
+    }
+
+    fn syntax_rule(&mut self) -> Result<(SyntaxPattern, SyntaxTemplate)> {
+        self.expect_next_nth(1, TokenData::LeftParen)?;
+        let pattern = self.pattern()?;
+        self.advance(1)?;
+        let template = self.template()?;
+        self.expect_next_nth(1, TokenData::RightParen)?;
+        Ok((pattern, template))
+    }
+
+    fn pattern(&mut self) -> Result<SyntaxPattern> {
+        let pattern = match self.current.take() {
+            Some(token) => {
+                let data = match token.data {
+                    TokenData::Identifier(ident) if ident == "_" => SyntaxPatternBody::Underscore,
+                    TokenData::Identifier(ident) if ident == "." => SyntaxPatternBody::Period,
+                    TokenData::Identifier(ident) if ident == "..." => SyntaxPatternBody::Ellipsis,
+                    TokenData::Identifier(ident) => SyntaxPatternBody::Identifier(ident),
+                    TokenData::Primitive(p) => SyntaxPatternBody::Primitive(p),
+                    TokenData::LeftParen => {
+                        let iter = self.repeat(Self::pattern);
+                        let (mut prefix, mut suffix, mut cdr) = (vec![], vec![], None);
+                        let (mut has_suffix, mut has_cdr) = (false, false);
+                        for element in iter {
+                            let element = element?;
+                            match element.data {
+                                SyntaxPatternBody::Period => {
+                                    if has_cdr {
+                                        syntax_error!(element.location, "unexpected period");
+                                    } else {
+                                        has_cdr = true;
+                                    }
+                                }
+                                SyntaxPatternBody::Ellipsis => {
+                                    if has_suffix {
+                                        syntax_error!(element.location, "unexpected ellipsis");
+                                    } else {
+                                        has_suffix = true;
+                                    }
+                                }
+                                _ => match (has_suffix, has_cdr) {
+                                    (false, false) => prefix.push(element),
+                                    (true, false) => suffix.push(element),
+                                    (_, true) => {
+                                        if cdr.is_some() {
+                                            syntax_error!(element.location, "illegal pair pattern")
+                                        }
+                                        cdr = Some(Box::new(element))
+                                    }
+                                },
+                            }
+                        }
+                        SyntaxPatternBody::List(prefix, suffix, cdr)
+                    }
+                    TokenData::VecConsIntro => {
+                        let iter = self.repeat(Self::pattern);
+                        let mut vec = [vec![], vec![]];
+                        let mut has_suffix = 0;
+                        for element in iter {
+                            let element = element?;
+                            match element.data {
+                                SyntaxPatternBody::Period => {
+                                    syntax_error!(element.location, "unexpected period");
+                                }
+                                SyntaxPatternBody::Ellipsis => {
+                                    has_suffix = 1;
+                                }
+                                _ => vec[has_suffix].push(element),
+                            }
+                        }
+                        let [prefix, suffix] = vec;
+                        SyntaxPatternBody::Vector(prefix, suffix)
+                    }
+                    o => syntax_error!(self.location, "unrecognized pattern {}", o),
+                };
+                SyntaxPattern {
+                    data,
+                    location: token.location,
+                }
+            }
+            _ => syntax_error!(self.location, "unexpected end of input"),
+        };
+        Ok(pattern)
+    }
+
+    fn template_element(&mut self) -> Result<(SyntaxTemplate, /* with ellipsis */ bool)> {
+        let current = self.template()?;
+        let with_ellipsis = match (&current.data, self.peek_next_token()?) {
+            (SyntaxTemplateBody::Ellipsis, _) => todo!(),
+            (SyntaxTemplateBody::Period, _) => false,
+            (
+                _,
+                Some(Token {
+                    data: TokenData::Identifier(ident),
+                    ..
+                }),
+            ) if ident == "..." => {
+                self.advance(1)?;
+                true
+            }
+            _ => false,
+        };
+        Ok((current, with_ellipsis))
+    }
+
+    fn template(&mut self) -> Result<SyntaxTemplate> {
+        let tem = match self.current.take() {
+            Some(token) => {
+                let data = match token.data {
+                    TokenData::Identifier(ident) if ident == "..." => SyntaxTemplateBody::Ellipsis,
+                    TokenData::Identifier(ident) if ident == "." => SyntaxTemplateBody::Period,
+                    TokenData::Identifier(ident) => SyntaxTemplateBody::Identifier(ident),
+                    TokenData::Primitive(p) => SyntaxTemplateBody::Primitive(p),
+                    TokenData::LeftParen => {
+                        let iter = self.repeat(Self::template_element);
+                        let mut car = vec![];
+                        let mut cdr = None;
+                        let mut has_tail = false;
+                        for element in iter {
+                            let (element, with_ellipsis) = element?;
+                            match element.data {
+                                SyntaxTemplateBody::Period => {
+                                    if has_tail {
+                                        syntax_error!(element.location, "unexpected period");
+                                    } else {
+                                        has_tail = true;
+                                    }
+                                }
+                                _ => match (&cdr, has_tail, with_ellipsis) {
+                                    (_, false, _) => car.push((element, with_ellipsis)),
+                                    (None, true, false) => cdr = Some(Box::new(element)),
+                                    _ => syntax_error!(element.location, "illegal pair pattern"),
+                                },
+                            }
+                        }
+                        SyntaxTemplateBody::List(car, cdr)
+                    }
+                    TokenData::VecConsIntro => {
+                        let iter = self.repeat(Self::template_element);
+                        let mut vec = vec![];
+                        for element in iter {
+                            let element = element?;
+                            match element.0.data {
+                                SyntaxTemplateBody::Period => {
+                                    syntax_error!(element.0.location, "unexpected period")
+                                }
+                                _ => vec.push(element),
+                            }
+                        }
+                        SyntaxTemplateBody::Vector(vec)
+                    }
+                    o => syntax_error!(self.location, "unrecognized template {}", o),
+                };
+                SyntaxTemplate {
+                    data,
+                    location: self.location,
+                }
+            }
+            None => syntax_error!(self.location, "unexpect end of input"),
+        };
+        Ok(tem)
     }
 
     fn assginment(&mut self) -> Result<Expression> {
@@ -639,8 +811,10 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         for _ in 1..count {
             self.lexer.next();
         }
-        self.current = self.lexer.next().transpose()?;
-        self.location = self.current.as_ref().and_then(|t| t.location);
+        if count > 0 {
+            self.current = self.lexer.next().transpose()?;
+            self.location = self.current.as_ref().and_then(|t| t.location);
+        }
         Ok(&mut self.current)
     }
 
@@ -654,7 +828,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         }
     }
 
-    fn locate<T: PartialEq + Display>(&self, data: T) -> Located<T> {
+    fn locate<T: PartialEq>(&self, data: T) -> Located<T> {
         Located {
             data,
             location: self.location,
@@ -662,13 +836,22 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 }
 
+// macro_rules! match_expect_syntax {
+//     ($value:expr, $type:pat => $inner: expr, $type_name:expr) => {
+//         match $value {
+//             $type => Ok($inner),
+//             v => Err(SchemeError {
+//                 location: None,
+//                 category: ErrorType::Syntax,
+//                 message: format!("expect a {}, got {}", $type_name, v),
+//             }),
+//         }
+//     };
+// }
+
 #[cfg(test)]
 pub fn simple_procedure(formals: ParameterFormals, expression: Expression) -> Expression {
-    l(ExpressionBody::Procedure(SchemeProcedure(
-        formals,
-        vec![],
-        vec![expression],
-    )))
+    ExpressionBody::Procedure(SchemeProcedure(formals, vec![], vec![expression])).into()
 }
 #[test]
 fn empty() -> Result<()> {
@@ -700,31 +883,36 @@ pub fn token_stream_to_parser(
 
 #[test]
 fn integer() -> Result<()> {
-    let tokens = convert_located(vec![TokenData::Integer(1)]);
+    let tokens = convert_located(vec![TokenData::Primitive(Primitive::Integer(1))]);
     let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
-    assert_eq!(ast, expr_body_to_statement(ExpressionBody::Integer(1)));
+    assert_eq!(ast, expr_body_to_statement(Primitive::Integer(1).into()));
     Ok(())
 }
 
 #[test]
 fn real_number() -> Result<()> {
-    let tokens = convert_located(vec![TokenData::Real("1.2".to_string())]);
+    let tokens = convert_located(vec![TokenData::Primitive(Primitive::Real(
+        "1.2".to_string(),
+    ))]);
     let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
-        expr_body_to_statement(ExpressionBody::Real("1.2".to_string()))
+        expr_body_to_statement(Primitive::Real("1.2".to_string()).into())
     );
     Ok(())
 }
 
 #[test]
 fn rational() -> Result<()> {
-    let tokens = convert_located(vec![TokenData::Rational(1, 2)]);
+    let tokens = convert_located(vec![TokenData::Primitive(Primitive::Rational(1, 2))]);
     let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
-    assert_eq!(ast, expr_body_to_statement(ExpressionBody::Rational(1, 2)));
+    assert_eq!(
+        ast,
+        expr_body_to_statement(Primitive::Rational(1, 2).into())
+    );
     Ok(())
 }
 
@@ -744,30 +932,32 @@ fn identifier() -> Result<()> {
 fn vector() -> Result<()> {
     let tokens = convert_located(vec![
         TokenData::VecConsIntro,
-        TokenData::Integer(1),
-        TokenData::Boolean(false),
+        TokenData::Primitive(Primitive::Integer(1)),
+        TokenData::Primitive(Primitive::Boolean(false)),
         TokenData::RightParen,
     ]);
     let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
-        expr_body_to_statement(ExpressionBody::Vector(vec![
-            l(ExpressionBody::Integer(1)),
-            l(ExpressionBody::Boolean(false))
-        ]))
+        expr_body_to_statement(ExpressionBody::Vector(convert_located(vec![
+            Primitive::Integer(1).into(),
+            Primitive::Boolean(false).into()
+        ])))
     );
     Ok(())
 }
 
 #[test]
 fn string() -> Result<()> {
-    let tokens = convert_located(vec![TokenData::String("hello world".to_string())]);
+    let tokens = convert_located(vec![TokenData::Primitive(Primitive::String(
+        "hello world".to_string(),
+    ))]);
     let mut parser = token_stream_to_parser(tokens.into_iter());
     let ast = parser.parse()?;
     assert_eq!(
         ast,
-        expr_body_to_statement(ExpressionBody::String("hello world".to_string()))
+        expr_body_to_statement(Primitive::String("hello world".to_string()).into())
     );
     Ok(())
 }
@@ -777,9 +967,9 @@ fn procedure_call() -> Result<()> {
     let tokens = convert_located(vec![
         TokenData::LeftParen,
         TokenData::Identifier("+".to_string()),
-        TokenData::Integer(1),
-        TokenData::Integer(2),
-        TokenData::Integer(3),
+        TokenData::Primitive(Primitive::Integer(1)),
+        TokenData::Primitive(Primitive::Integer(2)),
+        TokenData::Primitive(Primitive::Integer(3)),
         TokenData::RightParen,
     ]);
     let mut parser = token_stream_to_parser(tokens.into_iter());
@@ -787,11 +977,11 @@ fn procedure_call() -> Result<()> {
     assert_eq!(
         ast,
         expr_body_to_statement(ExpressionBody::ProcedureCall(
-            Box::new(l(ExpressionBody::Identifier("+".to_string()))),
+            Box::new(ExpressionBody::Identifier("+".to_string()).into()),
             vec![
-                l(ExpressionBody::Integer(1)),
-                l(ExpressionBody::Integer(2)),
-                l(ExpressionBody::Integer(3)),
+                Primitive::Integer(1).into(),
+                Primitive::Integer(2).into(),
+                Primitive::Integer(3).into(),
             ]
         ))
     );
@@ -803,9 +993,9 @@ fn unmatched_parantheses() {
     let tokens = convert_located(vec![
         TokenData::LeftParen,
         TokenData::Identifier("+".to_string()),
-        TokenData::Integer(1),
-        TokenData::Integer(2),
-        TokenData::Integer(3),
+        TokenData::Primitive(Primitive::Integer(1)),
+        TokenData::Primitive(Primitive::Integer(2)),
+        TokenData::Primitive(Primitive::Integer(3)),
     ]);
     let mut parser = token_stream_to_parser(tokens.into_iter());
     assert_eq!(
@@ -826,7 +1016,7 @@ fn definition() -> Result<()> {
                 TokenData::LeftParen,
                 TokenData::Identifier("define".to_string()),
                 TokenData::Identifier("a".to_string()),
-                TokenData::Integer(1),
+                TokenData::Primitive(Primitive::Integer(1)),
                 TokenData::RightParen,
             ]);
             let mut parser = token_stream_to_parser(tokens.into_iter());
@@ -835,7 +1025,7 @@ fn definition() -> Result<()> {
                 ast,
                 def_body_to_statement(DefinitionBody(
                     "a".to_string(),
-                    l(ExpressionBody::Integer(1))
+                    Primitive::Integer(1).into()
                 ))
             );
         }
@@ -863,13 +1053,14 @@ fn definition() -> Result<()> {
                     "add".to_string(),
                     simple_procedure(
                         ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
-                        l(ExpressionBody::ProcedureCall(
-                            Box::new(l(ExpressionBody::Identifier("+".to_string()))),
+                        ExpressionBody::ProcedureCall(
+                            Box::new(ExpressionBody::Identifier("+".to_string()).into()),
                             vec![
-                                l(ExpressionBody::Identifier("x".to_string())),
-                                l(ExpressionBody::Identifier("y".to_string())),
+                                ExpressionBody::Identifier("x".to_string()).into(),
+                                ExpressionBody::Identifier("y".to_string()).into(),
                             ]
-                        ))
+                        )
+                        .into()
                     )
                 ))
             )
@@ -894,7 +1085,7 @@ fn definition() -> Result<()> {
                     "add".to_string(),
                     simple_procedure(
                         ParameterFormals(vec![], Some("x".to_string())),
-                        l(ExpressionBody::Identifier("x".to_string()))
+                        ExpressionBody::Identifier("x".to_string()).into()
                     )
                 ))
             )
@@ -908,11 +1099,11 @@ fn nested_procedure_call() -> Result<()> {
     let tokens = convert_located(vec![
         TokenData::LeftParen,
         TokenData::Identifier("+".to_string()),
-        TokenData::Integer(1),
+        TokenData::Primitive(Primitive::Integer(1)),
         TokenData::LeftParen,
         TokenData::Identifier("-".to_string()),
-        TokenData::Integer(2),
-        TokenData::Integer(3),
+        TokenData::Primitive(Primitive::Integer(2)),
+        TokenData::Primitive(Primitive::Integer(3)),
         TokenData::RightParen,
         TokenData::RightParen,
     ]);
@@ -921,13 +1112,14 @@ fn nested_procedure_call() -> Result<()> {
     assert_eq!(
         ast,
         expr_body_to_statement(ExpressionBody::ProcedureCall(
-            Box::new(l(ExpressionBody::Identifier("+".to_string()))),
+            Box::new(ExpressionBody::Identifier("+".to_string()).into()),
             vec![
-                l(ExpressionBody::Integer(1)),
-                l(ExpressionBody::ProcedureCall(
-                    Box::new(l(ExpressionBody::Identifier("-".to_string()))),
-                    vec![l(ExpressionBody::Integer(2)), l(ExpressionBody::Integer(3))]
-                )),
+                Primitive::Integer(1).into(),
+                ExpressionBody::ProcedureCall(
+                    Box::new(ExpressionBody::Identifier("-".to_string()).into()),
+                    vec![Primitive::Integer(2).into(), Primitive::Integer(3).into()]
+                )
+                .into(),
             ]
         ))
     );
@@ -957,13 +1149,14 @@ fn lambda() -> Result<()> {
             ast,
             Some(Statement::Expression(simple_procedure(
                 ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
-                l(ExpressionBody::ProcedureCall(
-                    Box::new(l(ExpressionBody::Identifier("+".to_string()))),
+                ExpressionBody::ProcedureCall(
+                    Box::new(ExpressionBody::Identifier("+".to_string()).into()),
                     vec![
-                        l(ExpressionBody::Identifier("x".to_string())),
-                        l(ExpressionBody::Identifier("y".to_string()))
+                        ExpressionBody::Identifier("x".to_string()).into(),
+                        ExpressionBody::Identifier("y".to_string()).into()
                     ]
-                ))
+                )
+                .into()
             )))
         );
     }
@@ -978,7 +1171,7 @@ fn lambda() -> Result<()> {
             TokenData::LeftParen,
             TokenData::Identifier("define".to_string()),
             TokenData::Identifier("y".to_string()),
-            TokenData::Integer(1),
+            TokenData::Primitive(Primitive::Integer(1)),
             TokenData::RightParen,
             TokenData::LeftParen,
             TokenData::Identifier("+".to_string()),
@@ -991,22 +1184,24 @@ fn lambda() -> Result<()> {
         let ast = parser.parse()?;
         assert_eq!(
             ast,
-            Some(Statement::Expression(l(ExpressionBody::Procedure(
-                SchemeProcedure(
+            Some(Statement::Expression(
+                ExpressionBody::Procedure(SchemeProcedure(
                     ParameterFormals(vec!["x".to_string()], None),
                     vec![Definition::from_data(DefinitionBody(
                         "y".to_string(),
-                        l(ExpressionBody::Integer(1))
+                        Primitive::Integer(1).into()
                     ))],
-                    vec![l(ExpressionBody::ProcedureCall(
-                        Box::new(l(ExpressionBody::Identifier("+".to_string()))),
+                    vec![ExpressionBody::ProcedureCall(
+                        Box::new(ExpressionBody::Identifier("+".to_string()).into()),
                         vec![
-                            l(ExpressionBody::Identifier("x".to_string())),
-                            l(ExpressionBody::Identifier("y".to_string()))
+                            ExpressionBody::Identifier("x".to_string()).into(),
+                            ExpressionBody::Identifier("y".to_string()).into()
                         ]
-                    ))]
-                )
-            ))))
+                    )
+                    .into()]
+                ))
+                .into()
+            ))
         );
     }
 
@@ -1020,7 +1215,7 @@ fn lambda() -> Result<()> {
             TokenData::LeftParen,
             TokenData::Identifier("define".to_string()),
             TokenData::Identifier("y".to_string()),
-            TokenData::Integer(1),
+            TokenData::Primitive(Primitive::Integer(1)),
             TokenData::RightParen,
             TokenData::RightParen,
         ]);
@@ -1056,19 +1251,21 @@ fn lambda() -> Result<()> {
         let ast = parser.parse()?;
         assert_eq!(
             ast,
-            Some(Statement::Expression(l(ExpressionBody::Procedure(
-                SchemeProcedure(
+            Some(Statement::Expression(
+                ExpressionBody::Procedure(SchemeProcedure(
                     ParameterFormals(vec!["x".to_string()], Some("y".to_string())),
                     vec![],
-                    vec![l(ExpressionBody::ProcedureCall(
-                        Box::new(l(ExpressionBody::Identifier("+".to_string()))),
+                    vec![ExpressionBody::ProcedureCall(
+                        Box::new(ExpressionBody::Identifier("+".to_string()).into()),
                         vec![
-                            l(ExpressionBody::Identifier("x".to_string())),
-                            l(ExpressionBody::Identifier("y".to_string()))
+                            ExpressionBody::Identifier("x".to_string()).into(),
+                            ExpressionBody::Identifier("y".to_string()).into()
                         ]
-                    ))]
-                )
-            ))))
+                    )
+                    .into()]
+                ))
+                .into()
+            ))
         );
     }
 
@@ -1080,21 +1277,22 @@ fn conditional() -> Result<()> {
     let tokens = convert_located(vec![
         TokenData::LeftParen,
         TokenData::Identifier("if".to_string()),
-        TokenData::Boolean(true),
-        TokenData::Integer(1),
-        TokenData::Integer(2),
+        TokenData::Primitive(Primitive::Boolean(true)),
+        TokenData::Primitive(Primitive::Integer(1)),
+        TokenData::Primitive(Primitive::Integer(2)),
         TokenData::RightParen,
     ]);
     let mut parser = token_stream_to_parser(tokens.into_iter());
     assert_eq!(
         parser.parse()?,
-        Some(Statement::Expression(l(ExpressionBody::Conditional(
-            Box::new((
-                l(ExpressionBody::Boolean(true)),
-                l(ExpressionBody::Integer(1)),
-                Some(l(ExpressionBody::Integer(2)))
-            ))
-        ))))
+        Some(Statement::Expression(
+            ExpressionBody::Conditional(Box::new((
+                Primitive::Boolean(true).into(),
+                Primitive::Integer(1).into(),
+                Some(Primitive::Integer(2).into())
+            )))
+            .into()
+        ))
     );
     assert_eq!(parser.parse()?, None);
     Ok(())
@@ -1156,19 +1354,19 @@ fn literals() -> Result<()> {
     {
         let tokens = convert_located(vec![
             TokenData::Quote,
-            TokenData::Integer(1),
+            TokenData::Primitive(Primitive::Integer(1)),
             TokenData::Quote,
             TokenData::Identifier("a".to_string()),
             TokenData::Quote,
             TokenData::LeftParen,
-            TokenData::Integer(1),
+            TokenData::Primitive(Primitive::Integer(1)),
             TokenData::RightParen,
             TokenData::VecConsIntro,
-            TokenData::Integer(1),
+            TokenData::Primitive(Primitive::Integer(1)),
             TokenData::RightParen,
             TokenData::Quote,
             TokenData::VecConsIntro,
-            TokenData::Integer(1),
+            TokenData::Primitive(Primitive::Integer(1)),
             TokenData::RightParen,
         ]);
         let parser = token_stream_to_parser(tokens.into_iter());
@@ -1176,23 +1374,115 @@ fn literals() -> Result<()> {
         assert_eq!(
             asts,
             vec![
-                Statement::Expression(l(ExpressionBody::Quote(Box::new(l(
-                    ExpressionBody::Integer(1)
-                ))))),
-                Statement::Expression(l(ExpressionBody::Quote(Box::new(l(
-                    ExpressionBody::Identifier("a".to_string())
-                ))))),
-                Statement::Expression(l(ExpressionBody::Quote(Box::new(l(ExpressionBody::List(
-                    vec![l(ExpressionBody::Integer(1))]
-                )))))),
-                Statement::Expression(l(ExpressionBody::Vector(vec![l(ExpressionBody::Integer(
-                    1
-                ))]))),
-                Statement::Expression(l(ExpressionBody::Quote(Box::new(l(
-                    ExpressionBody::Vector(vec![l(ExpressionBody::Integer(1))])
-                ))))),
+                Statement::Expression(
+                    ExpressionBody::Quote(Box::new(Primitive::Integer(1).into())).into()
+                ),
+                Statement::Expression(
+                    ExpressionBody::Quote(Box::new(
+                        ExpressionBody::Identifier("a".to_string()).into(),
+                    ))
+                    .into()
+                ),
+                Statement::Expression(
+                    ExpressionBody::Quote(Box::new(
+                        ExpressionBody::List(vec![Primitive::Integer(1).into()]).into()
+                    ))
+                    .into()
+                ),
+                Statement::Expression(
+                    ExpressionBody::Vector(vec![Primitive::Integer(1).into()]).into()
+                ),
+                Statement::Expression(
+                    ExpressionBody::Quote(Box::new(
+                        ExpressionBody::Vector(vec![Primitive::Integer(1).into()]).into()
+                    ))
+                    .into()
+                ),
             ]
         );
     }
+    Ok(())
+}
+
+#[test]
+fn syntax() -> Result<()> {
+    let tokens = convert_located(vec![
+        TokenData::LeftParen,
+        TokenData::Identifier("define-syntax".to_string()),
+        TokenData::Identifier("begin".to_string()),
+        TokenData::LeftParen,
+        TokenData::Identifier("syntax-rules".to_string()),
+        TokenData::LeftParen,
+        TokenData::RightParen,
+        TokenData::LeftParen,
+        TokenData::LeftParen,
+        TokenData::Identifier("begin".to_string()),
+        TokenData::Identifier("exp".to_string()),
+        TokenData::Identifier("...".to_string()),
+        TokenData::RightParen,
+        TokenData::LeftParen,
+        TokenData::LeftParen,
+        TokenData::Identifier("lambda".to_string()),
+        TokenData::LeftParen,
+        TokenData::RightParen,
+        TokenData::Identifier("exp".to_string()),
+        TokenData::Identifier("...".to_string()),
+        TokenData::RightParen,
+        TokenData::RightParen,
+        TokenData::RightParen,
+        TokenData::RightParen,
+        TokenData::RightParen,
+    ]);
+
+    let parser = token_stream_to_parser(tokens.into_iter());
+    let asts = parser.collect::<Result<Vec<_>>>()?;
+    assert_eq!(
+        asts,
+        vec![Statement::SyntaxDefinition(
+            SyntaxDefBody(
+                "begin".to_owned(),
+                Transformer {
+                    ellipsis: None,
+                    literals: Vec::new(),
+                    rules: vec![(
+                        SyntaxPatternBody::List(
+                            vec![
+                                SyntaxPatternBody::Identifier("begin".to_string()).into(),
+                                SyntaxPatternBody::Identifier("exp".to_string()).into(),
+                            ],
+                            vec![],
+                            None
+                        )
+                        .into(),
+                        SyntaxTemplateBody::List(
+                            vec![(
+                                SyntaxTemplateBody::List(
+                                    vec![
+                                        (
+                                            SyntaxTemplateBody::Identifier("lambda".to_string())
+                                                .into(),
+                                            false
+                                        ),
+                                        (SyntaxTemplateBody::List(vec![], None).into(), false),
+                                        (
+                                            SyntaxTemplateBody::Identifier("exp".to_string())
+                                                .into(),
+                                            true
+                                        ),
+                                    ],
+                                    None
+                                )
+                                .into(),
+                                false
+                            )],
+                            None
+                        )
+                        .into()
+                    )],
+                }
+            )
+            .into()
+        )]
+    );
     Ok(())
 }
