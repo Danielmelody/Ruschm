@@ -4,6 +4,8 @@ use std::fmt;
 use std::iter::Iterator;
 use std::iter::Peekable;
 
+use super::Primitive;
+
 type Result<T> = std::result::Result<T, SchemeError>;
 
 pub type Token = Located<TokenData>;
@@ -11,12 +13,7 @@ pub type Token = Located<TokenData>;
 #[derive(PartialEq, Debug, Clone)]
 pub enum TokenData {
     Identifier(String),
-    Boolean(bool),
-    Real(String), // delay the conversion of real literal to internal represent for different virtual machines (for example, fixed-points).
-    Integer(i32),
-    Rational(i32, u32),
-    Character(char),
-    String(String),
+    Primitive(Primitive),
     LeftParen,
     RightParen,
     VecConsIntro,     // #(...)
@@ -25,7 +22,7 @@ pub enum TokenData {
     Quasiquote,       // BackQuote
     Unquote,          // ,
     UnquoteSplicing,  // ,@
-    Period,
+    Period,           // .
 }
 
 impl fmt::Display for TokenData {
@@ -97,10 +94,10 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                 '#' => match self.advance(1) {
                     Some(cn) => match cn {
                         '(' => Ok(Some(TokenData::VecConsIntro)),
-                        't' => Ok(Some(TokenData::Boolean(true))),
-                        'f' => Ok(Some(TokenData::Boolean(false))),
+                        't' => Ok(Some(TokenData::Primitive(Primitive::Boolean(true)))),
+                        'f' => Ok(Some(TokenData::Primitive(Primitive::Boolean(false)))),
                         '\\' => match self.advance(1).take() {
-                            Some(cnn) => Ok(Some(TokenData::Character(cnn))),
+                            Some(cnn) => Ok(Some(TokenData::Primitive(Primitive::Character(cnn)))),
                             None => {
                                 invalid_token!(Some(self.location), "expect character after #\\")
                             }
@@ -237,12 +234,16 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
             };
             match valid {
                 true => loop {
-                    match self.advance(1).take() {
+                    match self.peekable_char_stream.peek() {
                         Some(nc) => match nc {
-                            _ if is_identifier_initial(nc) => identifier_str.push(nc),
-                            '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(nc),
+                            _ if is_identifier_initial(*nc) => {
+                                identifier_str.push(self.advance(1).unwrap());
+                            }
+                            '0'..='9' | '+' | '-' | '.' | '@' => {
+                                identifier_str.push(self.advance(1).unwrap());
+                            }
                             _ => {
-                                Self::test_delimiter(Some(self.location), nc)?;
+                                Self::test_delimiter(Some(self.location), *nc)?;
                                 break;
                             }
                         },
@@ -313,7 +314,11 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                 loop {
                     if let Some(c) = self.advance(1).take() {
                         match c {
-                            '"' => break Ok(Some(TokenData::String(string_literal))),
+                            '"' => {
+                                break Ok(Some(TokenData::Primitive(Primitive::String(
+                                    string_literal,
+                                ))))
+                            }
                             '\\' => {
                                 match self.advance(1) {
                                     Some(ec) => {
@@ -413,17 +418,21 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                             '0'..='9' => self.digital10(&mut number_literal)?,
                             'e' => {
                                 self.number_suffix(&mut number_literal)?;
-                                break Ok(Some(TokenData::Real(number_literal)));
+                                break Ok(Some(TokenData::Primitive(Primitive::Real(
+                                    number_literal,
+                                ))));
                             }
                             '.' => {
                                 self.real(&mut number_literal)?;
-                                break Ok(Some(TokenData::Real(number_literal)));
+                                break Ok(Some(TokenData::Primitive(Primitive::Real(
+                                    number_literal,
+                                ))));
                             }
                             '/' => {
                                 let mut denominator = String::new();
                                 self.advance(1);
                                 self.digital10(&mut denominator)?;
-                                break Ok(Some(TokenData::Rational(
+                                break Ok(Some(TokenData::Primitive(Primitive::Rational(
                                     number_literal.parse::<i32>().unwrap(),
                                     match denominator.parse::<u32>().unwrap() {
                                         0 => invalid_token!(
@@ -432,19 +441,19 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                                         ),
                                         other => other,
                                     },
-                                )));
+                                ))));
                             }
                             _ => {
                                 Self::test_delimiter(Some(self.location), *nc)?;
-                                break Ok(Some(TokenData::Integer(
+                                break Ok(Some(TokenData::Primitive(Primitive::Integer(
                                     number_literal.parse::<i32>().unwrap(),
-                                )));
+                                ))));
                             }
                         },
                         None => {
-                            break Ok(Some(TokenData::Integer(
+                            break Ok(Some(TokenData::Primitive(Primitive::Integer(
                                 number_literal.parse::<i32>().unwrap(),
-                            )))
+                            ))))
                         }
                     }
                 }
@@ -468,8 +477,8 @@ fn simple_tokens() -> Result<()> {
     assert_eq!(
         tokenize("#t#f()#()#u8()'`,,@.")?,
         vec![
-            TokenData::Boolean(true),
-            TokenData::Boolean(false),
+            TokenData::Primitive(Primitive::Boolean(true)),
+            TokenData::Primitive(Primitive::Boolean(false)),
             TokenData::LeftParen,
             TokenData::RightParen,
             TokenData::VecConsIntro,
@@ -527,9 +536,9 @@ fn character() -> Result<()> {
     assert_eq!(
         tokenize("#\\a#\\ #\\\t")?,
         vec![
-            TokenData::Character('a'),
-            TokenData::Character(' '),
-            TokenData::Character('\t')
+            TokenData::Primitive(Primitive::Character('a')),
+            TokenData::Primitive(Primitive::Character(' ')),
+            TokenData::Primitive(Primitive::Character('\t'))
         ]
     );
     Ok(())
@@ -540,9 +549,9 @@ fn string() -> Result<()> {
     assert_eq!(
         tokenize("\"()+-123\"\"\\\"\"\"\\a\\b\\t\\r\\n\\\\\\|\"")?,
         vec![
-            TokenData::String(String::from("()+-123")),
-            TokenData::String(String::from("\"")),
-            TokenData::String(String::from("\u{007}\u{008}\t\r\n\\|"))
+            TokenData::Primitive(Primitive::String(String::from("()+-123"))),
+            TokenData::Primitive(Primitive::String(String::from("\""))),
+            TokenData::Primitive(Primitive::String(String::from("\u{007}\u{008}\t\r\n\\|")))
         ]
     );
     Ok(())
@@ -559,22 +568,22 @@ fn number() -> Result<()> {
             "
         )?,
         vec![
-            TokenData::Integer(123),
-            TokenData::Integer(123),
-            TokenData::Integer(-123),
-            TokenData::Real("1.23".to_string()),
-            TokenData::Real("-12.34".to_string()),
-            TokenData::Real("1.".to_string()),
-            TokenData::Real("0.".to_string()),
-            TokenData::Real("+.0".to_string()),
-            TokenData::Real("-.1".to_string()),
-            TokenData::Real("1e10".to_string()),
-            TokenData::Real("1.3e20".to_string()),
-            TokenData::Real("-43.e-12".to_string()),
-            TokenData::Real("+.12e+12".to_string()),
-            TokenData::Rational(1, 2),
-            TokenData::Rational(1, 2),
-            TokenData::Rational(-32, 3),
+            TokenData::Primitive(Primitive::Integer(123)),
+            TokenData::Primitive(Primitive::Integer(123)),
+            TokenData::Primitive(Primitive::Integer(-123)),
+            TokenData::Primitive(Primitive::Real("1.23".to_string())),
+            TokenData::Primitive(Primitive::Real("-12.34".to_string())),
+            TokenData::Primitive(Primitive::Real("1.".to_string())),
+            TokenData::Primitive(Primitive::Real("0.".to_string())),
+            TokenData::Primitive(Primitive::Real("+.0".to_string())),
+            TokenData::Primitive(Primitive::Real("-.1".to_string())),
+            TokenData::Primitive(Primitive::Real("1e10".to_string())),
+            TokenData::Primitive(Primitive::Real("1.3e20".to_string())),
+            TokenData::Primitive(Primitive::Real("-43.e-12".to_string())),
+            TokenData::Primitive(Primitive::Real("+.12e+12".to_string())),
+            TokenData::Primitive(Primitive::Rational(1, 2)),
+            TokenData::Primitive(Primitive::Rational(1, 2)),
+            TokenData::Primitive(Primitive::Rational(-32, 3)),
         ]
     );
     assert_eq!(
@@ -598,19 +607,21 @@ fn number() -> Result<()> {
 
 #[test]
 
-fn atmosphere() -> Result<()> {
+fn delimiter() -> Result<()> {
     assert_eq!(
-        tokenize("\t(- \n4\r(+ 1 2))")?,
+        tokenize("\t(- \n4\r(+ 1 2)) ...)")?,
         vec![
             TokenData::LeftParen,
             TokenData::Identifier(String::from("-")),
-            TokenData::Integer(4),
+            TokenData::Primitive(Primitive::Integer(4)),
             TokenData::LeftParen,
             TokenData::Identifier(String::from("+")),
-            TokenData::Integer(1),
-            TokenData::Integer(2),
+            TokenData::Primitive(Primitive::Integer(1)),
+            TokenData::Primitive(Primitive::Integer(2)),
             TokenData::RightParen,
-            TokenData::RightParen
+            TokenData::RightParen,
+            TokenData::Identifier(String::from("...")),
+            TokenData::RightParen,
         ]
     );
     Ok(())
@@ -622,8 +633,48 @@ fn comment() -> Result<()> {
         tokenize("abcd;+-12\n 12;dew\r34")?,
         vec![
             TokenData::Identifier(String::from("abcd")),
-            TokenData::Integer(12),
-            TokenData::Integer(34)
+            TokenData::Primitive(Primitive::Integer(12)),
+            TokenData::Primitive(Primitive::Integer(34))
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn temp() -> Result<()> {
+    assert_eq!(
+        tokenize(
+            "(define-syntax begin
+            (syntax-rules ()
+                ((begin exp ... )
+                    ((lambda () exp ... )))))"
+        )?,
+        vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("define-syntax".to_string()),
+            TokenData::Identifier("begin".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("syntax-rules".to_string()),
+            TokenData::LeftParen,
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("begin".to_string()),
+            TokenData::Identifier("exp".to_string()),
+            TokenData::Identifier("...".to_string()),
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("lambda".to_string()),
+            TokenData::LeftParen,
+            TokenData::RightParen,
+            TokenData::Identifier("exp".to_string()),
+            TokenData::Identifier("...".to_string()),
+            TokenData::RightParen,
+            TokenData::RightParen,
+            TokenData::RightParen,
+            TokenData::RightParen,
+            TokenData::RightParen,
         ]
     );
     Ok(())

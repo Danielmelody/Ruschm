@@ -31,6 +31,15 @@ impl<T: PartialEq> Located<T> {
     }
 }
 
+impl<T: PartialEq> From<T> for Located<T> {
+    fn from(data: T) -> Self {
+        Self {
+            data,
+            location: None,
+        }
+    }
+}
+
 impl<T: PartialEq> PartialEq for Located<T> {
     fn eq(&self, other: &Self) -> bool {
         self.data == other.data
@@ -65,11 +74,6 @@ impl Display for SchemeError {
 #[cfg(test)]
 pub(crate) fn convert_located<T: PartialEq>(datas: Vec<T>) -> Vec<Located<T>> {
     datas.into_iter().map(|d| Located::from_data(d)).collect()
-}
-
-#[cfg(test)]
-pub fn l<T: PartialEq>(data: T) -> Located<T> {
-    Located::from_data(data)
 }
 
 macro_rules! invalid_token {
