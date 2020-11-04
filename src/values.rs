@@ -419,10 +419,29 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for BuildinProcedure<
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub enum Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     User(SchemeProcedure, Rc<E>),
     Buildin(BuildinProcedure<R, E>),
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for Procedure<R, E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::User(p, _) => write!(f, "{:?}", p),
+            Self::Buildin(b) => write!(f, "{:?}", b),
+        }
+    }
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for Procedure<R, E> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::User(a, _), Self::User(b, _)) => a == b,
+            (Self::Buildin(a), Self::Buildin(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl ParameterFormals {}
