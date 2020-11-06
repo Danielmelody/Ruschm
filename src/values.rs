@@ -18,13 +18,13 @@ use crate::{
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
-pub trait RealNumberInternalTrait: Display + Debug + Real
+pub trait RealNumberInternalTrait: Display + Debug + Real + Default
 where
     Self: std::marker::Sized,
 {
 }
 
-impl<T: Display + Debug + Real> RealNumberInternalTrait for T {}
+impl<T: Display + Debug + Real + Default> RealNumberInternalTrait for T {}
 #[derive(Debug, Clone, Copy)]
 pub enum Number<R: RealNumberInternalTrait> {
     Integer(i32),
@@ -390,13 +390,13 @@ pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
 
 #[derive(Clone, PartialEq)]
 pub enum BuildinProcedurePointer<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    Pure(fn(ArgVec<R, E>) -> Result<Value<R, E>>),
+    Pure(fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>),
     Impure(fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>),
 }
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuildinProcedurePointer<R, E> {
     pub fn apply(&self, args: ArgVec<R, E>, env: &Rc<E>) -> Result<Value<R, E>> {
         match &self {
-            Self::Pure(pointer) => pointer(args),
+            Self::Pure(pointer) => pointer(args, env.clone()),
             Self::Impure(pointer) => pointer(args, env.clone()),
         }
     }
@@ -431,7 +431,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
     pub fn new_buildin_pure(
         name: &'static str,
         parameters: ParameterFormals,
-        pointer: fn(ArgVec<R, E>) -> Result<Value<R, E>>,
+        pointer: fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>,
     ) -> Self {
         Self::Buildin(BuildinProcedure {
             name,
