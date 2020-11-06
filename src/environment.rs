@@ -10,7 +10,9 @@ use std::rc::Rc;
 
 pub type DefinitionIter<'a, R, E> = Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, E>)>>;
 
-pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + PartialEq {
+pub trait IEnvironment<R: RealNumberInternalTrait>:
+    std::fmt::Debug + Clone + PartialEq + Default
+{
     fn new() -> Self
     where
         Self: Sized;
@@ -33,7 +35,7 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R, Self>>;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct StandardEnv<R: RealNumberInternalTrait> {
     parent: Option<Rc<StandardEnv<R>>>,
     definitions: RefCell<HashMap<String, Value<R, StandardEnv<R>>>>,

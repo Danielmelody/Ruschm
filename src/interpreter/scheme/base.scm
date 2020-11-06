@@ -15,7 +15,17 @@
 
 (define (list . x) x)
 
+(define (make-list k fill) (if (> k 0) (cons fill (make-list (- k 1) fill)) '()))
+
 (define (null? x) (eqv? x '()))
+
+
+(define (append . lsts)
+  (cond
+    ((null? lsts) '())
+    ((null? (car lsts)) (apply append (cdr lsts)))
+    (else (cons (caar lsts) (apply append (cdar lsts) (cdr lsts))))))
+
 
 (define (map proc list)
     (if (pair? list)
@@ -24,11 +34,16 @@
     )
 )
 
+; (define filter
+;     (lambda (pred lst)
+;       (cond ((null? lst) '())
+;             ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))
+;             (else (filterb pred (cdr lst))))))
 
-; (define (for-each proc list)
-;     (if (pair? list)
-;         (begin (proc (car list)) (for-each proc (cdr list)))
-;         #t ))
+
+(define (for-each proc list)
+    (if (pair? list)
+        ((lambda () (proc (car list)) (for-each proc (cdr list))))))
 
 (define (list-tail x k)
     (if (= k 0)
@@ -67,6 +82,8 @@
          (eqv? x y))))
 
 (define (list? x)
-  (or (eq? x '())
-      (and (pair? x)
-           (list? (cdr x)))))
+  (if (eq? x '())
+      #t
+      (if (pair? x)
+           (if (list? (cdr x)) #t #f)
+           #f)))

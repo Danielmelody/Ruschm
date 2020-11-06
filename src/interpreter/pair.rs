@@ -1,6 +1,5 @@
+use crate::{environment::IEnvironment, error::*, values::RealNumberInternalTrait, values::Value};
 use std::{fmt::Display, iter::FromIterator};
-
-use crate::{environment::IEnvironment, values::RealNumberInternalTrait, values::Value};
 
 // r7rs 6.4. Pairs and lists
 
@@ -48,5 +47,44 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> FromIterator<Value<R, E>> f
             list = Value::Pair(Box::new(Pair { car: i, cdr: list }));
         }
         list
+    }
+}
+
+pub struct PairIter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    next: Option<Pair<R, E>>,
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Iterator for PairIter<R, E> {
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next.take() {
+            Some(next) => {
+                let current = next.car;
+                self.next = match next.cdr {
+                    Value::Pair(next) => Some(*next),
+                    Value::EmptyList => None,
+                    _ => {
+                        return Some(Err(SchemeError {
+                            category: ErrorType::Logic,
+                            message: "inproper list".to_string(),
+                            location: None,
+                        }))
+                    }
+                };
+                Some(Ok(current))
+            }
+            None => None,
+        }
+    }
+
+    type Item = Result<Value<R, E>, SchemeError>;
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> IntoIterator for Pair<R, E> {
+    type Item = Result<Value<R, E>, SchemeError>;
+
+    type IntoIter = PairIter<R, E>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        PairIter { next: Some(self) }
     }
 }

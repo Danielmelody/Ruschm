@@ -18,13 +18,13 @@ use crate::{
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
-pub trait RealNumberInternalTrait: Display + Debug + Real
+pub trait RealNumberInternalTrait: Display + Debug + Real + Default
 where
     Self: std::marker::Sized,
 {
 }
 
-impl<T: Display + Debug + Real> RealNumberInternalTrait for T {}
+impl<T: Display + Debug + Real + Default> RealNumberInternalTrait for T {}
 #[derive(Debug, Clone, Copy)]
 pub enum Number<R: RealNumberInternalTrait> {
     Integer(i32),
