@@ -31,7 +31,6 @@ fn apply<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 fn car<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     Ok(iter.next().unwrap().expect_list_or_pair()?.car)
@@ -39,7 +38,6 @@ fn car<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 fn cdr<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     Ok(iter.next().unwrap().expect_list_or_pair()?.cdr)
@@ -47,7 +45,6 @@ fn cdr<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 fn cons<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     match (iter.next(), iter.next()) {
@@ -58,7 +55,7 @@ fn cons<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 macro_rules! value_test {
     ($variant:pat) => {
-        |arguments, _| {
+        |arguments| {
             let arg = arguments.into_iter().next().unwrap();
             match arg {
                 $variant => Ok(Value::Boolean(true)),
@@ -70,7 +67,6 @@ macro_rules! value_test {
 
 fn eqv<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     let a = iter.next().unwrap();
@@ -92,7 +88,7 @@ fn equivalance_predicate() {
             Value::Number(Number::Integer(1)),
             Value::Number(Number::Integer(1)),
         ];
-        assert_eq!(eqv(arguments, Default::default()), Ok(Value::Boolean(true)));
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(true)));
     }
 
     {
@@ -106,10 +102,7 @@ fn equivalance_predicate() {
                 Value::Character('b'),
             ))),
         ];
-        assert_eq!(
-            eqv(arguments, Default::default()),
-            Ok(Value::Boolean(false))
-        );
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(false)));
     }
 
     {
@@ -117,37 +110,30 @@ fn equivalance_predicate() {
             Value::Vector(ValueReference::new_immutable(vec![Value::Character('a')])),
             Value::Vector(ValueReference::new_immutable(vec![Value::Character('a')])),
         ];
-        assert_eq!(
-            eqv(arguments, Default::default()),
-            Ok(Value::Boolean(false))
-        );
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(false)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(1)),
             Value::Number(Number::Integer(1)),
         ];
-        assert_eq!(eqv(arguments, Default::default()), Ok(Value::Boolean(true)));
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(true)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(1)),
             Value::Number(Number::Rational(1, 1)),
         ];
-        assert_eq!(
-            eqv(arguments, Default::default()),
-            Ok(Value::Boolean(false))
-        );
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(false)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::EmptyList, Value::EmptyList];
-        assert_eq!(eqv(arguments, Default::default()), Ok(Value::Boolean(true)));
+        assert_eq!(eqv(arguments), Ok(Value::Boolean(true)));
     }
 }
 
 fn not<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     match arguments.into_iter().next().unwrap() {
         Value::Boolean(false) => Ok(Value::Boolean(true)),
@@ -157,7 +143,6 @@ fn not<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 fn add<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     arguments
         .into_iter()
@@ -169,27 +154,18 @@ fn add<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 fn buildin_add() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![];
-        assert_eq!(
-            add(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(0)))
-        );
+        assert_eq!(add(arguments), Ok(Value::Number(Number::Integer(0))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::Number(Number::Integer(2))];
-        assert_eq!(
-            add(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(2)))
-        );
+        assert_eq!(add(arguments), Ok(Value::Number(Number::Integer(2))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(2)),
             Value::Number(Number::Integer(3)),
         ];
-        assert_eq!(
-            add(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(5)))
-        );
+        assert_eq!(add(arguments), Ok(Value::Number(Number::Integer(5))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
@@ -197,16 +173,12 @@ fn buildin_add() {
             Value::Number(Number::Integer(3)),
             Value::Number(Number::Integer(4)),
         ];
-        assert_eq!(
-            add(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(9)))
-        );
+        assert_eq!(add(arguments), Ok(Value::Number(Number::Integer(9))));
     }
 }
 
 fn sub<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     let first = iter.next().unwrap().expect_number()?;
@@ -222,20 +194,14 @@ fn sub<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 fn buildin_sub() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::Number(Number::Integer(2))];
-        assert_eq!(
-            sub(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(-2)))
-        );
+        assert_eq!(sub(arguments), Ok(Value::Number(Number::Integer(-2))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(2)),
             Value::Number(Number::Integer(3)),
         ];
-        assert_eq!(
-            sub(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(-1)))
-        );
+        assert_eq!(sub(arguments), Ok(Value::Number(Number::Integer(-1))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
@@ -243,16 +209,12 @@ fn buildin_sub() {
             Value::Number(Number::Integer(3)),
             Value::Number(Number::Integer(4)),
         ];
-        assert_eq!(
-            sub(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(-5)))
-        );
+        assert_eq!(sub(arguments), Ok(Value::Number(Number::Integer(-5))));
     }
 }
 
 fn mul<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     arguments
         .into_iter()
@@ -264,27 +226,18 @@ fn mul<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 fn buildin_mul() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![];
-        assert_eq!(
-            mul(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(1)))
-        );
+        assert_eq!(mul(arguments), Ok(Value::Number(Number::Integer(1))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::Number(Number::Integer(2))];
-        assert_eq!(
-            mul(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(2)))
-        );
+        assert_eq!(mul(arguments), Ok(Value::Number(Number::Integer(2))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(2)),
             Value::Number(Number::Integer(3)),
         ];
-        assert_eq!(
-            mul(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(6)))
-        );
+        assert_eq!(mul(arguments), Ok(Value::Number(Number::Integer(6))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
@@ -292,16 +245,12 @@ fn buildin_mul() {
             Value::Number(Number::Integer(3)),
             Value::Number(Number::Integer(4)),
         ];
-        assert_eq!(
-            mul(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(24)))
-        );
+        assert_eq!(mul(arguments), Ok(Value::Number(Number::Integer(24))));
     }
 }
 
 fn div<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     let first = iter.next().unwrap().expect_number()?;
@@ -317,20 +266,14 @@ fn div<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 fn buildin_div() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::Number(Number::Integer(2))];
-        assert_eq!(
-            div(arguments, Default::default()),
-            Ok(Value::Number(Number::Real(0.5)))
-        );
+        assert_eq!(div(arguments), Ok(Value::Number(Number::Real(0.5))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(2)),
             Value::Number(Number::Integer(8)),
         ];
-        assert_eq!(
-            div(arguments, Default::default()),
-            Ok(Value::Number(Number::Real(0.25)))
-        );
+        assert_eq!(div(arguments), Ok(Value::Number(Number::Real(0.25))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
@@ -339,7 +282,7 @@ fn buildin_div() {
             Value::Number(Number::Real(0.125)),
         ];
         assert_eq!(
-            div(arguments, Default::default()),
+            div(arguments),
             Ok(Value::<f32, _>::Number(Number::Real(2.)))
         );
     }
@@ -349,7 +292,7 @@ fn buildin_div() {
             Value::Number(Number::Integer(0)),
         ];
         assert_eq!(
-            div(arguments, Default::default()),
+            div(arguments),
             Err(SchemeError {
                 location: None,
                 category: ErrorType::Logic,
@@ -362,8 +305,7 @@ fn buildin_div() {
 macro_rules! numeric_one_argument {
     ($name:tt, $func:tt$(, $err_handle:tt)?) => {
         fn $func<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-            arguments: impl IntoIterator<Item = Value<R, E>>,
-            _environment: Rc<E>
+            arguments: impl IntoIterator<Item = Value<R, E>>
         ) -> Result<Value<R, E>> {
             Ok(Value::Number(arguments.into_iter().next().unwrap().expect_number()?.$func()$($err_handle)?))
         }
@@ -381,18 +323,14 @@ fn buildin_numeric_one() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> =
             vec![Value::Number(Number::Rational(-49, 3))];
-        assert_eq!(
-            floor(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(-17)))
-        );
+        assert_eq!(floor(arguments), Ok(Value::Number(Number::Integer(-17))));
     }
 }
 
 macro_rules! numeric_two_arguments {
     ($name:tt, $func:tt$(, $err_handle:tt)?) => {
         fn $func<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-            arguments: impl IntoIterator<Item = Value<R, E>>,
-            _environment: Rc<E>
+            arguments: impl IntoIterator<Item = Value<R, E>>
         ) -> Result<Value<R, E>> {
             let mut iter = arguments.into_iter();
             let lhs = iter.next().unwrap().expect_number()?;
@@ -412,14 +350,13 @@ fn buildin_numeric_two() {
             Value::Number(Number::Integer(3)),
         ];
         assert_eq!(
-            floor_remainder(arguments, Default::default()),
+            floor_remainder(arguments),
             Ok(Value::Number(Number::Integer(2)))
         );
     }
 }
 fn vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let vector: Vec<Value<R, E>> = arguments.into_iter().collect();
     Ok(Value::Vector(ValueReference::new_mutable(vector)))
@@ -427,7 +364,6 @@ fn vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 fn make_vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     let k = iter.next().unwrap().expect_integer()?;
@@ -447,7 +383,7 @@ fn buildin_make_vector() {
         let arguments: Vec<Value<f32, StandardEnv<_>>> =
             vec![Value::Number(Number::Integer(3)), Value::Boolean(true)];
         assert_eq!(
-            make_vector(arguments, Default::default()),
+            make_vector(arguments),
             Ok(Value::Vector(ValueReference::new_mutable(vec![
                 Value::Boolean(true),
                 Value::Boolean(true),
@@ -459,7 +395,7 @@ fn buildin_make_vector() {
         let arguments: Vec<Value<f32, StandardEnv<_>>> =
             vec![Value::Number(Number::Integer(0)), Value::Boolean(true)];
         assert_eq!(
-            make_vector(arguments, Default::default()),
+            make_vector(arguments),
             Ok(Value::Vector(ValueReference::new_mutable(vec![])))
         );
     }
@@ -467,7 +403,7 @@ fn buildin_make_vector() {
         let arguments: Vec<Value<f32, StandardEnv<_>>> =
             vec![Value::Number(Number::Integer(-1)), Value::Boolean(true)];
         assert_eq!(
-            make_vector(arguments, Default::default()),
+            make_vector(arguments),
             Err(SchemeError {
                 location: None,
                 category: ErrorType::Logic,
@@ -479,7 +415,6 @@ fn buildin_make_vector() {
 
 fn vector_length<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let vector = arguments.into_iter().next().unwrap().expect_vector()?;
     let len = vector.as_ref().len();
@@ -497,7 +432,7 @@ fn buildin_vector_length() {
             ]));
         let arguments = vec![vector.clone()];
         assert_eq!(
-            vector_length(arguments, Default::default()),
+            vector_length(arguments),
             Ok(Value::Number(Number::Integer(3)))
         );
     }
@@ -506,7 +441,7 @@ fn buildin_vector_length() {
             Value::Vector(ValueReference::new_immutable(vec![]));
         let arguments = vec![vector.clone()];
         assert_eq!(
-            vector_length(arguments, Default::default()),
+            vector_length(arguments),
             Ok(Value::Number(Number::Integer(0)))
         );
     }
@@ -514,7 +449,6 @@ fn buildin_vector_length() {
 
 fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     let vector = iter.next().unwrap().expect_vector()?;
@@ -535,29 +469,23 @@ fn buildin_vector_ref() {
     ]));
     {
         let arguments = vec![vector.clone(), Value::Number(Number::Integer(0))];
-        assert_eq!(
-            vector_ref(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(5)))
-        );
+        assert_eq!(vector_ref(arguments), Ok(Value::Number(Number::Integer(5))));
     }
     {
         let arguments = vec![vector.clone(), Value::Number(Number::Integer(1))];
-        assert_eq!(
-            vector_ref(arguments, Default::default()),
-            Ok(Value::String("foo".to_string()))
-        );
+        assert_eq!(vector_ref(arguments), Ok(Value::String("foo".to_string())));
     }
     {
         let arguments = vec![vector.clone(), Value::Number(Number::Integer(2))];
         assert_eq!(
-            vector_ref(arguments, Default::default()),
+            vector_ref(arguments),
             Ok(Value::Number(Number::Rational(5, 3)))
         );
     }
     {
         let arguments = vec![vector.clone(), Value::Number(Number::Integer(3))];
         assert_eq!(
-            vector_ref(arguments, Default::default()),
+            vector_ref(arguments),
             Err(SchemeError {
                 location: None,
                 category: ErrorType::Logic,
@@ -569,7 +497,6 @@ fn buildin_vector_ref() {
 
 fn vector_set<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     let mut iter = arguments.into_iter();
     let vector = iter.next().unwrap().expect_vector()?;
@@ -597,7 +524,7 @@ fn buildin_vector_set() -> Result<()> {
             Value::Number(Number::Integer(0)),
             Value::Number(Number::Real(3.14)),
         ];
-        assert_eq!(vector_set(arguments, Default::default()), Ok(Value::Void));
+        assert_eq!(vector_set(arguments), Ok(Value::Void));
         assert_eq!(
             vector,
             Value::Vector(ValueReference::new_mutable(vec![
@@ -613,7 +540,7 @@ fn buildin_vector_set() -> Result<()> {
             Value::Number(Number::Integer(1)),
             Value::Number(Number::Integer(5)),
         ];
-        assert_eq!(vector_set(arguments, Default::default()), Ok(Value::Void));
+        assert_eq!(vector_set(arguments), Ok(Value::Void));
         assert_eq!(
             vector,
             Value::Vector(ValueReference::new_mutable(vec![
@@ -629,7 +556,7 @@ fn buildin_vector_set() -> Result<()> {
             Value::Number(Number::Integer(2)),
             Value::String("bar".to_string()),
         ];
-        assert_eq!(vector_set(arguments, Default::default()), Ok(Value::Void));
+        assert_eq!(vector_set(arguments), Ok(Value::Void));
         assert_eq!(
             vector,
             Value::Vector(ValueReference::new_mutable(vec![
@@ -646,7 +573,7 @@ fn buildin_vector_set() -> Result<()> {
             Value::Number(Number::Integer(5)),
         ];
         assert_eq!(
-            vector_set(arguments, Default::default()),
+            vector_set(arguments),
             Err(SchemeError {
                 location: None,
                 category: ErrorType::Logic,
@@ -659,7 +586,6 @@ fn buildin_vector_set() -> Result<()> {
 
 fn display<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
-    _environment: Rc<E>,
 ) -> Result<Value<R, E>> {
     print!("{}", arguments.into_iter().next().unwrap());
     Ok(Value::Void)
@@ -667,7 +593,6 @@ fn display<R: RealNumberInternalTrait, E: IEnvironment<R>>(
 
 fn newline<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     _: impl IntoIterator<Item = Value<R, E>>,
-    _: Rc<E>,
 ) -> Result<Value<R, E>> {
     println!("");
     Ok(Value::Void)
@@ -677,7 +602,7 @@ macro_rules! typed_comparision {
     ($name:tt, $operator:tt, $expect_type: tt) => {
         fn $name<R: RealNumberInternalTrait, E: IEnvironment<R>>(
                         arguments: impl IntoIterator<Item = Value<R, E>>,
-                        _environment: Rc<E>,
+
         ) -> Result<Value<R, E>> {
             let mut iter = arguments.into_iter();
             match iter.next() {
@@ -710,37 +635,25 @@ typed_comparision!(boolean_equal, <=, expect_boolean);
 fn buildin_greater() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![];
-        assert_eq!(
-            greater(arguments, Default::default()),
-            Ok(Value::Boolean(true))
-        );
+        assert_eq!(greater(arguments), Ok(Value::Boolean(true)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::Number(Number::Integer(2))];
-        assert_eq!(
-            greater(arguments, Default::default()),
-            Ok(Value::Boolean(true))
-        );
+        assert_eq!(greater(arguments), Ok(Value::Boolean(true)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(4)),
             Value::Number(Number::Integer(2)),
         ];
-        assert_eq!(
-            greater(arguments, Default::default()),
-            Ok(Value::Boolean(true))
-        );
+        assert_eq!(greater(arguments), Ok(Value::Boolean(true)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(4)),
             Value::Number(Number::Integer(8)),
         ];
-        assert_eq!(
-            greater(arguments, Default::default()),
-            Ok(Value::Boolean(false))
-        );
+        assert_eq!(greater(arguments), Ok(Value::Boolean(false)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
@@ -748,10 +661,7 @@ fn buildin_greater() {
             Value::Number(Number::Integer(2)),
             Value::Number(Number::Integer(1)),
         ];
-        assert_eq!(
-            greater(arguments, Default::default()),
-            Ok(Value::Boolean(true))
-        );
+        assert_eq!(greater(arguments), Ok(Value::Boolean(true)));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
@@ -759,10 +669,7 @@ fn buildin_greater() {
             Value::Number(Number::Integer(2)),
             Value::Number(Number::Integer(2)),
         ];
-        assert_eq!(
-            greater(arguments, Default::default()),
-            Ok(Value::Boolean(false))
-        );
+        assert_eq!(greater(arguments), Ok(Value::Boolean(false)));
     }
 }
 
@@ -770,7 +677,7 @@ macro_rules! first_of_order {
     ($name:tt, $cmp:tt) => {
         fn $name<R: RealNumberInternalTrait, E: IEnvironment<R>>(
                         arguments: impl IntoIterator<Item = Value<R, E>>,
-                        _environment: Rc<E>,
+
         ) -> Result<Value<R, E>> {
             let mut iter = arguments.into_iter();
             let init = iter.next().unwrap().expect_number()?;
@@ -790,30 +697,21 @@ first_of_order!(min, <);
 fn buildin_min() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![Value::Number(Number::Integer(2))];
-        assert_eq!(
-            min(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(2)))
-        );
+        assert_eq!(min(arguments), Ok(Value::Number(Number::Integer(2))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(4)),
             Value::Number(Number::Integer(2)),
         ];
-        assert_eq!(
-            min(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(2)))
-        );
+        assert_eq!(min(arguments), Ok(Value::Number(Number::Integer(2))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
             Value::Number(Number::Integer(4)),
             Value::Number(Number::Integer(8)),
         ];
-        assert_eq!(
-            min(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(4)))
-        );
+        assert_eq!(min(arguments), Ok(Value::Number(Number::Integer(4))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
@@ -821,10 +719,7 @@ fn buildin_min() {
             Value::Number(Number::Integer(2)),
             Value::Number(Number::Integer(1)),
         ];
-        assert_eq!(
-            min(arguments, Default::default()),
-            Ok(Value::Number(Number::Integer(1)))
-        );
+        assert_eq!(min(arguments), Ok(Value::Number(Number::Integer(1))));
     }
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> = vec![
@@ -832,16 +727,26 @@ fn buildin_min() {
             Value::Number(Number::Integer(2)),
             Value::Number(Number::Integer(2)),
         ];
-        assert_eq!(
-            greater(arguments, Default::default()),
-            Ok(Value::Boolean(false))
-        );
+        assert_eq!(greater(arguments), Ok(Value::Boolean(false)));
     }
 }
 
 pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
 ) -> HashMap<String, Value<R, E>> {
     macro_rules! function_mapping {
+        ($ident:tt, $fixed_parameter:expr, $variadic_parameter:expr, $function:expr) => {
+            (
+                $ident.to_owned(),
+                Value::Procedure(Procedure::new_buildin_impure(
+                    $ident,
+                    ParameterFormals($fixed_parameter, $variadic_parameter),
+                    $function,
+                )),
+            )
+        };
+    }
+
+    macro_rules! pure_function_mapping {
         ($ident:tt, $fixed_parameter:expr, $variadic_parameter:expr, $function:expr) => {
             (
                 $ident.to_owned(),
@@ -861,130 +766,130 @@ pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
             Some("args".to_string()),
             apply
         ),
-        function_mapping!("car", vec!["pair".to_string()], None, car),
-        function_mapping!("cdr", vec!["pair".to_string()], None, cdr),
-        function_mapping!(
+        pure_function_mapping!("car", vec!["pair".to_string()], None, car),
+        pure_function_mapping!("cdr", vec!["pair".to_string()], None, cdr),
+        pure_function_mapping!(
             "eqv?",
             vec!["obj1".to_string(), "obj2".to_string()],
             None,
             eqv
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "eq?", // Ruschm is pass-by value now, so that eq? is equivalent to eqv?
             vec!["obj1".to_string(), "obj2".to_string()],
             None,
             eqv
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "cons",
             vec!["car".to_string(), "cdr".to_string()],
             None,
             cons
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "boolean?",
             vec!["obj".to_string()],
             None,
             value_test!(Value::Boolean(_))
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "char?",
             vec!["obj".to_string()],
             None,
             value_test!(Value::Character(_))
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "number?",
             vec!["obj".to_string()],
             None,
             value_test!(Value::Number(_))
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "string?",
             vec!["obj".to_string()],
             None,
             value_test!(Value::String(_))
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "symbol?",
             vec!["obj".to_string()],
             None,
             value_test!(Value::Symbol(_))
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "pair?",
             vec!["obj".to_string()],
             None,
             value_test!(Value::Pair(_))
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "procedure?",
             vec!["obj".to_string()],
             None,
             value_test!(Value::Procedure(_))
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "vector?",
             vec!["obj".to_string()],
             None,
             value_test!(Value::Vector(_))
         ),
-        function_mapping!("not", vec!["obj".to_string()], None, not),
-        function_mapping!(
+        pure_function_mapping!("not", vec!["obj".to_string()], None, not),
+        pure_function_mapping!(
             "boolean=?",
             vec![],
             Some("booleans".to_string()),
             boolean_equal
         ),
-        function_mapping!("+", vec![], Some("x".to_string()), add),
-        function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
-        function_mapping!("*", vec![], Some("x".to_string()), mul),
-        function_mapping!("/", vec!["x1".to_string()], Some("x".to_string()), div),
-        function_mapping!("=", vec![], Some("x".to_string()), equals),
-        function_mapping!("<", vec![], Some("x".to_string()), less),
-        function_mapping!("<=", vec![], Some("x".to_string()), less_equal),
-        function_mapping!(">", vec![], Some("x".to_string()), greater),
-        function_mapping!(">=", vec![], Some("x".to_string()), greater_equal),
-        function_mapping!("min", vec!["x1".to_string()], Some("x".to_string()), min),
-        function_mapping!("max", vec!["x1".to_string()], Some("x".to_string()), max),
-        function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
-        function_mapping!("floor", vec!["x".to_string()], None, floor),
-        function_mapping!("ceiling", vec!["x".to_string()], None, ceiling),
-        function_mapping!("exact", vec!["x".to_string()], None, exact),
-        function_mapping!(
+        pure_function_mapping!("+", vec![], Some("x".to_string()), add),
+        pure_function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
+        pure_function_mapping!("*", vec![], Some("x".to_string()), mul),
+        pure_function_mapping!("/", vec!["x1".to_string()], Some("x".to_string()), div),
+        pure_function_mapping!("=", vec![], Some("x".to_string()), equals),
+        pure_function_mapping!("<", vec![], Some("x".to_string()), less),
+        pure_function_mapping!("<=", vec![], Some("x".to_string()), less_equal),
+        pure_function_mapping!(">", vec![], Some("x".to_string()), greater),
+        pure_function_mapping!(">=", vec![], Some("x".to_string()), greater_equal),
+        pure_function_mapping!("min", vec!["x1".to_string()], Some("x".to_string()), min),
+        pure_function_mapping!("max", vec!["x1".to_string()], Some("x".to_string()), max),
+        pure_function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
+        pure_function_mapping!("floor", vec!["x".to_string()], None, floor),
+        pure_function_mapping!("ceiling", vec!["x".to_string()], None, ceiling),
+        pure_function_mapping!("exact", vec!["x".to_string()], None, exact),
+        pure_function_mapping!(
             "floor-quotient",
             vec!["n1".to_string(), "n2".to_string()],
             None,
             floor_quotient
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "floor-remainder",
             vec!["n1".to_string(), "n2".to_string()],
             None,
             floor_remainder
         ),
-        function_mapping!("display", vec!["value".to_string()], None, display),
-        function_mapping!("newline", vec![], None, newline),
-        function_mapping!("vector", vec![], Some("x".to_string()), vector),
-        function_mapping!(
+        pure_function_mapping!("display", vec!["value".to_string()], None, display),
+        pure_function_mapping!("newline", vec![], None, newline),
+        pure_function_mapping!("vector", vec![], Some("x".to_string()), vector),
+        pure_function_mapping!(
             "make-vector",
             vec!["k".to_string(), "obj".to_string()],
             None,
             make_vector
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "vector-length",
             vec!["vector".to_string()],
             None,
             vector_length
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "vector-ref",
             vec!["vector".to_string(), "k".to_string()],
             None,
             vector_ref
         ),
-        function_mapping!(
+        pure_function_mapping!(
             "vector-set!",
             vec!["vector".to_string(), "k".to_string(), "obj".to_string()],
             None,
