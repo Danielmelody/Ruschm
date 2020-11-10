@@ -4,9 +4,7 @@ use std::fmt;
 use std::iter::Iterator;
 use std::iter::Peekable;
 
-use super::Primitive;
-
-type Result<T> = std::result::Result<T, SchemeError>;
+use super::{error::SyntaxError, Primitive, Result};
 
 pub type Token = Located<TokenData>;
 
@@ -31,6 +29,8 @@ impl fmt::Display for TokenData {
     }
 }
 
+impl ToLocated for TokenData {}
+
 pub struct Lexer<CharIter: Iterator<Item = char>> {
     pub current: Option<char>,
     pub peekable_char_stream: Peekable<CharIter>,
@@ -42,7 +42,7 @@ impl<CharIter: Iterator<Item = char>> Iterator for Lexer<CharIter> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.try_next() {
             Ok(None) => None,
-            Ok(Some(data)) => Some(Ok(Token::from_data(data).locate(Some(self.location)))),
+            Ok(Some(data)) => Some(Ok(data.locate(Some(self.location)))),
             Err(e) => Some(Err(e)),
         }
     }
@@ -99,7 +99,10 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                         '\\' => match self.advance(1).take() {
                             Some(cnn) => Ok(Some(TokenData::Primitive(Primitive::Character(cnn)))),
                             None => {
-                                invalid_token!(Some(self.location), "expect character after #\\")
+                                return located_error!(
+                                    SyntaxError::UnexpectedEnd,
+                                    Some(self.location)
+                                )
                             }
                         },
                         'u' => {
@@ -108,15 +111,20 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                             {
                                 return Ok(Some(TokenData::ByteVecConsIntro));
                             } else {
-                                invalid_token!(
-                                    Some(self.location),
-                                    "Imcomplete bytevector constant introducer"
+                                return located_error!(
+                                    SyntaxError::UnrecognizedToken,
+                                    Some(self.location)
                                 );
                             }
                         }
-                        _ => invalid_token!(Some(self.location), "expect '(' 't' or 'f' after #"),
+                        _ => {
+                            return located_error!(
+                                SyntaxError::UnrecognizedToken,
+                                Some(self.location)
+                            )
+                        }
                     },
-                    None => invalid_token!(Some(self.location), "expect '(' 't' or 'f' after #"),
+                    None => return located_error!(SyntaxError::UnexpectedEnd, Some(self.location)),
                 },
                 '\'' => Ok(Some(TokenData::Quote)),
                 '`' => Ok(Some(TokenData::Quasiquote)),
@@ -146,7 +154,7 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                 },
                 '"' => self.string(),
                 '0'..='9' => self.number(),
-                '|' => self.quote_identifier(),
+                '|' => self.quoted_identifier(),
                 _ => self.normal_identifier(),
             },
             None => Ok(None),
@@ -172,7 +180,12 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
     fn test_delimiter(location: Option<[u32; 2]>, c: char) -> Result<()> {
         match c {
             ' ' | '\t' | '\n' | '\r' | '(' | ')' | '"' | ';' | '|' => Ok(()),
-            _ => invalid_token!(location, "Expect delimiter here instead of {}", c),
+            _ => {
+                return located_error!(
+                    SyntaxError::ExpectSomething("delimiter".to_string()),
+                    location
+                )
+            }
         }
     }
 
@@ -247,11 +260,12 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                                 break;
                             }
                         },
-                        None => invalid_token!(
-                            Some(self.location),
-                            "Invalid Identifer {}",
-                            identifier_str
-                        ),
+                        None => {
+                            return located_error!(
+                                SyntaxError::InvalidIdentifier(identifier_str.clone()),
+                                Some(self.location)
+                            );
+                        }
                     }
                 },
                 false => {
@@ -292,15 +306,16 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
         }
     }
 
-    fn quote_identifier(&mut self) -> Result<Option<TokenData>> {
+    fn quoted_identifier(&mut self) -> Result<Option<TokenData>> {
         let mut identifier_str = String::new();
         loop {
             match self.advance(1) {
-                None => invalid_token!(
-                    Some(self.location),
-                    "Incomplete identifier {}",
-                    identifier_str
-                ),
+                None => {
+                    return located_error!(
+                        SyntaxError::ImcompleteQuotedIdent(identifier_str),
+                        Some(self.location)
+                    );
+                }
                 Some('|') => break Ok(Some(TokenData::Identifier(identifier_str))),
                 Some(nc) => identifier_str.push(*nc),
             }
@@ -333,22 +348,26 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                                             '|' => string_literal.push('|'),
                                             'x' => (), // TODO: 'x' for hex value
                                             ' ' => (), // TODO: space for nothing
-                                            _ => invalid_token!(
-                                                Some(self.location),
-                                                "Unknown escape character"
-                                            ),
+                                            other => {
+                                                return located_error!(
+                                                    SyntaxError::UnknownEscape(*other),
+                                                    Some(self.location)
+                                                )
+                                            }
                                         }
                                     }
-                                    None => invalid_token!(
-                                        Some(self.location),
-                                        "Incomplete escape character"
-                                    ),
+                                    None => {
+                                        return located_error!(
+                                            SyntaxError::UnexpectedEnd,
+                                            Some(self.location)
+                                        )
+                                    }
                                 }
                             }
                             _ => string_literal.push(c),
                         }
                     } else {
-                        invalid_token!(Some(self.location), "Unclosed string literal")
+                        return located_error!(SyntaxError::UnexpectedEnd, Some(self.location));
                     }
                 }
             }
@@ -435,10 +454,12 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                                 break Ok(Some(TokenData::Primitive(Primitive::Rational(
                                     number_literal.parse::<i32>().unwrap(),
                                     match denominator.parse::<u32>().unwrap() {
-                                        0 => invalid_token!(
-                                            Some(self.location),
-                                            "rational denominator should not be 0!"
-                                        ),
+                                        0 => {
+                                            return located_error!(
+                                                SyntaxError::RationalDivideByZero,
+                                                Some(self.location)
+                                            )
+                                        }
                                         other => other,
                                     },
                                 ))));
@@ -588,19 +609,11 @@ fn number() -> Result<()> {
     );
     assert_eq!(
         tokenize("1/0"),
-        Err(SchemeError {
-            category: ErrorType::Lexical,
-            message: "rational denominator should not be 0!".to_string(),
-            location: Some([1, 4])
-        })
+        located_error!(SyntaxError::RationalDivideByZero, None)
     );
     assert_eq!(
         tokenize("1/00"),
-        Err(SchemeError {
-            category: ErrorType::Lexical,
-            message: "rational denominator should not be 0!".to_string(),
-            location: Some([1, 5])
-        })
+        located_error!(SyntaxError::RationalDivideByZero, None)
     );
     Ok(())
 }

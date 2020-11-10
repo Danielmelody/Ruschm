@@ -1,11 +1,13 @@
-use crate::error::*;
 use crate::interpreter::scheme;
 #[cfg(test)]
 use crate::interpreter::Interpreter;
 use crate::values::RealNumberInternalTrait;
 use crate::values::Value;
+use crate::{error::*, interpreter::error::LogicError};
 use cell::{Ref, RefCell, RefMut, RefVal};
 use std::collections::HashMap;
+#[cfg(test)]
+use std::error::Error;
 use std::rc::Rc;
 
 pub type DefinitionIter<'a, R, E> = Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, E>)>>;
@@ -87,7 +89,11 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
     fn set(&self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError> {
         match self.definitions.borrow_mut().get_mut(name) {
             None => match &self.parent {
-                None => logic_error!("unbound variable {}", name),
+                None => {
+                    return Err(
+                        ErrorData::Logic(LogicError::UnboundedSymbol(name.to_string())).no_locate(),
+                    );
+                }
                 Some(parent) => parent.set(name, value)?,
             },
             Some(variable) => *variable = value,
@@ -104,7 +110,7 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
 }
 
 #[test]
-fn iter_envs() -> Result<(), SchemeError> {
+fn iter_envs() -> Result<(), Box<dyn std::error::Error>> {
     let it = Interpreter::<f32, StandardEnv<f32>>::new();
     {
         it.env.define("a".to_string(), Value::Void);
@@ -123,7 +129,7 @@ fn iter_envs() -> Result<(), SchemeError> {
     Ok(())
 }
 #[test]
-fn get_mut() -> Result<(), SchemeError> {
+fn get_mut() -> Result<(), Box<dyn Error>> {
     use crate::values::Number;
     use std::ops::Deref;
     let env = StandardEnv::<f32>::new();

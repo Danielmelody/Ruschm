@@ -12,8 +12,8 @@ use num_traits::real::Real;
 use smallvec::SmallVec;
 
 use crate::{
-    environment::*, error::*, interpreter::pair::Pair, parser::ParameterFormals,
-    parser::SchemeProcedure,
+    environment::*, error::*, interpreter::error::LogicError, interpreter::pair::Pair,
+    parser::ParameterFormals, parser::SchemeProcedure,
 };
 
 type Result<T> = std::result::Result<T, SchemeError>;
@@ -237,7 +237,7 @@ impl<R: RealNumberInternalTrait> Number<R> {
         match self {
             Number::Real(num) => match num.round().to_i32() {
                 Some(i) => Ok(Number::Integer(i)),
-                None => logic_error!("cannot be converted to an exact number"),
+                None => error!(LogicError::InExactConversion(num.to_string())),
             },
             exact => Ok(exact),
         }
@@ -374,11 +374,7 @@ fn number_exact() {
     assert_eq!(Number::<f32>::Real(-5.3).exact(), Ok(Number::Integer(-5)));
     assert_eq!(
         Number::<f32>::Real(1e30).exact(),
-        Err(SchemeError {
-            location: None,
-            category: ErrorType::Logic,
-            message: "cannot be converted to an exact number".to_string()
-        })
+        error!(LogicError::InExactConversion(1e30.to_string())),
     );
     assert_eq!(
         Number::<f32>::Rational(7, 3).exact(),
@@ -492,26 +488,43 @@ pub enum ValueReference<T> {
     Mutable(Rc<RefCell<T>>),
 }
 
-impl<T> ValueReference<T> {
-    pub fn new_immutable(t: T) -> Self {
+impl<T: Display> Display for ValueReference<Vec<T>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::Immutable(ref vec) => {
+                write!(f, "{}", join(vec.iter().map(|v| format!("{}", v)), " "))
+            }
+            Self::Mutable(ref vec) => write!(
+                f,
+                "{}",
+                join(vec.borrow().iter().map(|v| format!("{}", v)), " ")
+            ),
+        }
+    }
+}
+
+// impl<T> Display for ValueReference<T> {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         todo!()
+//     }
+// }
+
+impl<T: Display> ValueReference<Vec<T>> {
+    pub fn new_immutable(t: Vec<T>) -> Self {
         Self::Immutable(Rc::new(t))
     }
-    pub fn new_mutable(t: T) -> Self {
+    pub fn new_mutable(t: Vec<T>) -> Self {
         Self::Mutable(Rc::new(RefCell::new(t)))
     }
-    pub fn as_ref<'a>(&'a self) -> Box<dyn 'a + Deref<Target = T>> {
+    pub fn as_ref<'a>(&'a self) -> Box<dyn 'a + Deref<Target = Vec<T>>> {
         match self {
             ValueReference::Immutable(t) => Box::new(t.as_ref()),
             ValueReference::Mutable(t) => Box::new(t.borrow()),
         }
     }
-    pub fn as_mut<'a>(&'a self) -> Result<RefMut<'a, T>> {
+    pub fn as_mut<'a>(&'a self) -> Result<RefMut<'a, Vec<T>>> {
         match self {
-            ValueReference::Immutable(_) => Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "expect a mutable reference, get a immutable reference!".to_string(),
-            }),
+            ValueReference::Immutable(_) => error!(LogicError::RequiresMutable(self.to_string())),
             ValueReference::Mutable(t) => Ok(t.borrow_mut()),
         }
     }
@@ -530,11 +543,10 @@ macro_rules! match_expect_type {
     ($value:expr, $type:pat => $inner: expr, $type_name:expr) => {
         match $value {
             $type => Ok($inner),
-            v => Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: format!("expect a {}, got {}", $type_name, v),
-            }),
+            _ => Err(
+                ErrorData::Logic(LogicError::TypeMisMatch($value.to_string(), $type_name))
+                    .no_locate(),
+            ),
         }
     };
 }
@@ -543,29 +555,43 @@ fn macro_match_expect_type() {
     assert_eq!(
         match_expect_type!(
             Value::<f32, StandardEnv<_>>::Number(Number::Integer(5)),
-            Value::Number(Number::Integer(i)) => i, "integer"
+            Value::Number(Number::Integer(i)) => i, Type::Integer
         ),
         Ok(5)
     );
     assert_eq!(
         match_expect_type!(
             Value::<f32, StandardEnv<_>>::Number(Number::Integer(1)),
-            Value::Number(Number::Integer(i)) => i + 3, "integer"
-        ),
+            Value::Number(Number::Integer(i)) => i + 3, Type::Integer),
         Ok(4)
     );
     assert_eq!(
         match_expect_type!(
             Value::<f32, StandardEnv<_>>::Number(Number::Integer(5)),
-            Value::String(s) => s, "string"
+            Value::String(s) => s, Type::String
         ),
-        Err(SchemeError {
-            location: None,
-            category: ErrorType::Logic,
-            message: "expect a string, got 5".to_string(),
-        })
+        error!(LogicError::TypeMisMatch(5.to_string(), Type::String))
     );
 }
+
+// TODO: using enum as type when RFC 1450 is stable
+#[derive(Debug, PartialEq, Clone)]
+pub enum Type {
+    Number, // Non exhaustive, but ok
+    Integer,
+    Real,
+    Rational,
+    Boolean,
+    Character,
+    String,
+    Symbol,
+    Procedure,
+    Vector,
+    Pair,
+    EmptyList,
+    Void,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Number(Number<R>),
@@ -582,31 +608,31 @@ pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     pub fn expect_number(self) -> Result<Number<R>> {
-        match_expect_type!(self, Value::Number(number) => number, "number")
+        match_expect_type!(self, Value::Number(number) => number, Type::Number)
     }
     pub fn expect_integer(self) -> Result<i32> {
-        match_expect_type!(self, Value::Number(Number::Integer(i)) => i, "integer")
+        match_expect_type!(self, Value::Number(Number::Integer(i)) => i, Type::Number)
     }
     pub fn expect_real(self) -> Result<R> {
-        match_expect_type!(self, Value::Number(Number::Real(r)) => r, "real")
+        match_expect_type!(self, Value::Number(Number::Real(r)) => r, Type::Real)
     }
     pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R, E>>>> {
-        match_expect_type!(self, Value::Vector(vector) => vector, "vector")
+        match_expect_type!(self, Value::Vector(vector) => vector, Type::Vector)
     }
     pub fn expect_list_or_pair(self) -> Result<Pair<R, E>> {
-        match_expect_type!(self, Value::Pair(list) => *list, "list/pair")
+        match_expect_type!(self, Value::Pair(list) => *list, Type::Pair)
     }
     pub fn expect_string(self) -> Result<String> {
-        match_expect_type!(self, Value::String(string) => string, "string")
+        match_expect_type!(self, Value::String(string) => string, Type::String)
     }
     pub fn expect_symbol(self) -> Result<String> {
-        match_expect_type!(self, Value::Symbol(string) => string, "symbol")
+        match_expect_type!(self, Value::Symbol(string) => string, Type::Symbol)
     }
     pub fn expect_procedure(self) -> Result<Procedure<R, E>> {
-        match_expect_type!(self, Value::Procedure(procedure) => procedure, "procedure")
+        match_expect_type!(self, Value::Procedure(procedure) => procedure, Type::Procedure)
     }
     pub fn expect_boolean(self) -> Result<bool> {
-        match_expect_type!(self, Value::Boolean(boolean) => boolean, "boolean")
+        match_expect_type!(self, Value::Boolean(condition) => condition, Type::Boolean)
     }
 }
 
@@ -620,12 +646,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Value<R, E> {
             Value::Boolean(true) => write!(f, "#t"),
             Value::Boolean(false) => write!(f, "#f"),
             Value::Character(c) => write!(f, "#\\{}", c),
-            Value::String(ref s) => write!(f, "\"{}\"", s),
-            Value::Vector(vec) => write!(
-                f,
-                "#({})",
-                join(vec.as_ref().iter().map(|v| format!("{}", v)), " ")
-            ),
+            Value::String(ref s) => write!(f, "{}", s),
+            Value::Vector(vecref) => write!(f, "#({})", vecref),
             Value::Pair(list) => write!(f, "{}", list),
             Value::EmptyList => write!(f, "()"),
         }
@@ -634,7 +656,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Value<R, E> {
 
 fn check_division_by_zero(num: i32) -> Result<()> {
     match num {
-        0 => logic_error!("division by exact zero"),
+        0 => error!(LogicError::DivisionByZero),
         _ => Ok(()),
     }
 }

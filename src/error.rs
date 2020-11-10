@@ -1,9 +1,11 @@
-#![allow(dead_code)]
+use thiserror::Error;
 
-use std::error::*;
 use std::fmt;
+use std::{error::Error, fmt::Debug};
 
 use fmt::Display;
+
+use crate::{interpreter::error::LogicError, parser::error::SyntaxError};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ErrorType {
@@ -11,23 +13,31 @@ pub enum ErrorType {
     Syntax,
     Logic,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Located<T: PartialEq> {
     pub data: T,
     pub location: Option<[u32; 2]>,
 }
 
-impl<T: PartialEq> Located<T> {
-    pub fn from_data(data: T) -> Self {
-        Self {
-            data,
-            location: None,
+pub trait ToLocated {
+    fn locate(self, location: Option<[u32; 2]>) -> Located<Self>
+    where
+        Self: Sized + PartialEq,
+    {
+        Located::<Self> {
+            data: self,
+            location,
         }
     }
 
-    pub fn locate(mut self, location: Option<[u32; 2]>) -> Self {
-        self.location = location;
-        self
+    fn no_locate(self) -> Located<Self>
+    where
+        Self: Sized + PartialEq,
+    {
+        Located::<Self> {
+            data: self,
+            location: None,
+        }
     }
 }
 
@@ -52,50 +62,43 @@ impl<T: PartialEq + Display> Display for Located<T> {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct SchemeError {
-    pub category: ErrorType,
-    pub message: String,
-    pub location: Option<[u32; 2]>,
+#[derive(PartialEq, Error, Clone)]
+pub enum ErrorData {
+    #[error("syntax error: {0}")]
+    Syntax(#[from] SyntaxError),
+    #[error(transparent)]
+    Logic(#[from] LogicError),
 }
 
-impl Error for SchemeError {}
+pub type SchemeError = Located<ErrorData>;
 
-impl Display for SchemeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self.category {
-            ErrorType::Lexical => write!(f, "Invalid token: {}", self.message),
-            ErrorType::Syntax => write!(f, "Syntax error: {}", self.message),
-            ErrorType::Logic => write!(f, "error: {}", self.message),
-        }
+impl ToLocated for ErrorData {}
+
+impl Debug for ErrorData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self, f)
+    }
+}
+
+impl Error for SchemeError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.data)
     }
 }
 
 #[cfg(test)]
 pub(crate) fn convert_located<T: PartialEq>(datas: Vec<T>) -> Vec<Located<T>> {
-    datas.into_iter().map(|d| Located::from_data(d)).collect()
+    datas.into_iter().map(|d| Located::from(d)).collect()
 }
 
-macro_rules! invalid_token {
-    ($location: expr, $($arg:tt)*) => (
-        return Err(SchemeError {category: ErrorType::Lexical, message: format!($($arg)*), location: $location });
-    )
+macro_rules! error {
+    ($arg:expr) => {
+        Err(ErrorData::from($arg).no_locate());
+    };
 }
 
-macro_rules! syntax_error {
-    ($location: expr, $($arg:tt)*) => (
-        return Err(SchemeError {category: ErrorType::Syntax, message: format!($($arg)*), location: $location})
-    )
-}
-
-macro_rules! logic_error {
-    ($($arg:tt)*) => (
-        return Err(SchemeError {category: ErrorType::Logic , message: format!($($arg)*), location: None});
-    )
-}
-
-macro_rules! logic_error_with_location {
-    ($location: expr, $($arg:tt)*) => (
-        return Err(SchemeError {category: ErrorType::Logic , message: format!($($arg)*), location: $location});
-    )
+macro_rules! located_error {
+    ($arg:expr, $loc:expr) => {
+        Err(ErrorData::from($arg).locate($loc));
+    };
 }
