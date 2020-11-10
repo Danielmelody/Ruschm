@@ -1,6 +1,10 @@
 use crate::{environment::IEnvironment, error::*, values::RealNumberInternalTrait, values::Value};
 use std::{fmt::Display, iter::FromIterator};
 
+use super::error::LogicError;
+
+// use super::error::error;
+
 // r7rs 6.4. Pairs and lists
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,13 +66,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Iterator for PairIter<R, E>
                 self.next = match next.cdr {
                     Value::Pair(next) => Some(*next),
                     Value::EmptyList => None,
-                    _ => {
-                        return Some(Err(SchemeError {
-                            category: ErrorType::Logic,
-                            message: "inproper list".to_string(),
-                            location: None,
-                        }))
-                    }
+                    other => return Some(error!(LogicError::InproperList(other.to_string()))),
                 };
                 Some(Ok(current))
             }

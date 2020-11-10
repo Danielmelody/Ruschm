@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use super::Result;
 use crate::parser::lexer::TokenData;
 use crate::{error::*, parser::lexer::Token};
 use fmt::Display;
@@ -7,10 +8,10 @@ use std::fmt;
 use std::iter::{repeat, Iterator, Peekable};
 
 use super::{
-    Primitive, SyntaxPattern, SyntaxPatternBody, SyntaxTemplate, SyntaxTemplateBody, Transformer,
+    error::SyntaxError, Primitive, SyntaxPattern, SyntaxPatternBody, SyntaxTemplate,
+    SyntaxTemplateBody, Transformer,
 };
 
-type Result<T> = std::result::Result<T, SchemeError>;
 pub type ParseResult = Result<Option<(Statement, Option<[u32; 2]>)>>;
 
 pub(crate) fn join_displayable(iter: impl IntoIterator<Item = impl fmt::Display>) -> String {
@@ -76,6 +77,8 @@ pub enum ExpressionBody {
     Conditional(Box<(Expression, Expression, Option<Expression>)>),
     Quote(Box<Expression>),
 }
+
+impl ToLocated for ExpressionBody {}
 
 impl From<Primitive> for ExpressionBody {
     fn from(p: Primitive) -> Self {
@@ -175,11 +178,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         "quote" => {
                             self.advance(2)?;
                             let quoted = self.quote()?;
-                            match self.advance(1)?.take().map(|t| t.data) {
-                                Some(TokenData::RightParen) => (),
-                                Some(o) => syntax_error!(self.location, "expect , got {}", o),
-                                None => syntax_error!(self.location, "unclosed quotation!"),
-                            }
+                            self.expect_next_nth(1, TokenData::RightParen)?;
                             quoted.into()
                         }
                         "define" => self.definition()?.into(),
@@ -192,10 +191,12 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     Some(Token {
                         data: TokenData::RightParen,
                         location,
-                    }) => syntax_error!(*location, "empty procedure call"),
+                    }) => return located_error!(SyntaxError::EmptyCall, *location),
                     _ => self.procedure_call()?.into(),
                 },
-                TokenData::RightParen => syntax_error!(location, "Unmatched Parentheses!"),
+                TokenData::RightParen => {
+                    return located_error!(SyntaxError::UnmatchedParentheses, location)
+                }
                 TokenData::VecConsIntro => self.vector()?.into(),
                 TokenData::Quote => {
                     self.advance(1)?;
@@ -206,16 +207,21 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     location,
                 }
                 .into(),
-                _ => syntax_error!(location, "unsupported grammar"),
+                _ => panic!("unsupported grammar"),
             })),
             None => Ok(None),
         }
     }
 
-    pub fn parse_current_expression(&mut self) -> Result<Expression> {
+    pub fn current_expression(&mut self) -> Result<Expression> {
         match self.parse_current()? {
             Some(Statement::Expression(expr)) => Ok(expr),
-            _ => syntax_error!(self.location, "expect a expression here"),
+            _ => {
+                return located_error!(
+                    SyntaxError::ExpectSomething("expression".to_owned()),
+                    self.location
+                )
+            }
         }
     }
 
@@ -231,54 +237,40 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 
     fn expression(&mut self) -> Result<Expression> {
-        Ok(match self.parse()? {
-            Some(Statement::Expression(expr)) => expr,
-            _ => syntax_error!(self.location, "expect expression"),
-        })
+        self.advance(1)?;
+        self.current_expression()
     }
 
-    // we know it will never be RightParen
-    fn get_identifier(&mut self) -> Result<String> {
+    fn next_identifier(&mut self) -> Result<String> {
+        self.advance(1)?;
+        self.current_identifier()
+    }
+
+    fn current_identifier(&mut self) -> Result<String> {
         match self.current.as_ref().map(|t| &t.data) {
             Some(TokenData::Identifier(ident)) => Ok(ident.clone()),
-            Some(o) => syntax_error!(self.location, "expect an identifier, got {}", o),
-            None => syntax_error!(
-                self.location,
-                "expect an identifier while encountered end of input"
+            _ => located_error!(
+                SyntaxError::ExpectSomething("identifier".to_string()),
+                self.location
             ),
         }
     }
 
-    fn get_identifier_pair(&mut self) -> Result<(String, String)> {
-        let location = self.location;
-        let pairs = [
-            self.current.take(),
-            self.advance(1)?.take(),
-            self.advance(1)?.take(),
-            self.advance(1)?.take(),
-        ];
-        let datas = pairs
-            .iter()
-            .map(|o| o.as_ref().map(|t| &t.data))
-            .collect::<Vec<_>>();
-        match datas.as_slice() {
-            [Some(TokenData::LeftParen), Some(TokenData::Identifier(ident1)), Some(TokenData::Identifier(ident2)), Some(TokenData::RightParen)] => {
-                Ok((ident1.clone(), ident2.clone()))
-            }
-            other => syntax_error!(
-                location,
-                "expect an identifier pair: (ident1, ident2), got {:?}",
-                other
-            ),
-        }
+    fn current_identifier_pair(&mut self) -> Result<(String, String)> {
+        self.expect_next_nth(0, TokenData::LeftParen)?;
+        let car = self.next_identifier()?;
+        let cdr = self.next_identifier()?;
+        self.expect_next_nth(1, TokenData::RightParen)?;
+        Ok((car, cdr))
     }
 
     fn expect_next_nth(&mut self, n: usize, tobe: TokenData) -> Result<()> {
-        let test = self.advance(n)?;
-        match test {
-            Some(Token { data, .. }) if data == &tobe => Ok(()),
-            Some(other) => syntax_error!(other.location, "expect {}, got {}", tobe, other),
-            None => syntax_error!(self.location, "expect {}", tobe),
+        match self.advance_unwrap(n)? {
+            Token { data, .. } if data == &tobe => Ok(()),
+            Token { data, .. } => located_error!(
+                SyntaxError::TokenMisMatch(tobe, Some(data.clone())),
+                self.location
+            ),
         }
     }
 
@@ -296,7 +288,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     self.advance(1)?;
                     Ok(None)
                 }
-                None => syntax_error!(self.location, "unexpect end of input"),
+                None => located_error!(SyntaxError::UnexpectedEnd, self.location),
                 _ => {
                     self.advance(1)?;
                     Some(get_element(self)).transpose()
@@ -321,19 +313,13 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     break Ok(formals);
                 }
                 Some(TokenData::Period) => {
-                    if formals.0.len() == 0 {
-                        syntax_error!(
-                            self.location,
-                            "must provide at least normal parameter before variadic parameter"
-                        )
-                    }
                     self.advance(2)?;
-                    formals.1 = Some(self.get_identifier()?);
+                    formals.1 = Some(self.current_identifier()?);
                 }
-                None => syntax_error!(self.location, "unexpect end of input"),
+                None => return located_error!(SyntaxError::UnexpectedEnd, self.location),
                 _ => {
                     self.advance(1)?;
-                    let parameter = self.get_identifier()?;
+                    let parameter = self.current_identifier()?;
                     formals.0.push(parameter);
                 }
             }
@@ -364,20 +350,24 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     location: self.location,
                 }
             }
-            None => syntax_error!(self.location, "expect a literal"),
-            _ => self.parse_current_expression()?,
+            None => return located_error!(SyntaxError::UnexpectedEnd, self.location),
+            _ => self.current_expression()?,
         })
     }
 
     fn lambda(&mut self) -> Result<Expression> {
-        let location = self.location;
         let mut formals = ParameterFormals::new();
         match self.advance(2)?.take().map(|t| t.data) {
             Some(TokenData::Identifier(ident)) => formals.1 = Some(ident),
             Some(TokenData::LeftParen) => {
                 formals = self.procedure_formals()?;
             }
-            _ => syntax_error!(location, "expect formal identifiers"),
+            _ => {
+                return located_error!(
+                    SyntaxError::ExpectSomething("lambda formals".to_string()),
+                    self.location
+                );
+            }
         }
         self.procedure_body(formals)
     }
@@ -393,19 +383,24 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     if expressions.is_empty() {
                         definitions.push(def)
                     } else {
-                        syntax_error!(def.location, "unexpect definition af expression")
+                        return located_error!(
+                            SyntaxError::InvalidDefinitionContext(def.data),
+                            def.location
+                        );
                     }
                 }
                 Some(Statement::Expression(expr)) => expressions.push(expr),
-                None => syntax_error!(body_location, "lambda body empty"),
-                _ => syntax_error!(
-                    body_location,
-                    "procedure body can only contains definition or expression"
-                ),
+                None => return located_error!(SyntaxError::LambdaBodyNoExpression, body_location),
+                _ => {
+                    return located_error!(
+                        SyntaxError::ExpectSomething("expression or definition".to_string()),
+                        body_location
+                    )
+                }
             }
         }
         if expressions.is_empty() {
-            syntax_error!(self.location, "no expression in procedure body")
+            return located_error!(SyntaxError::LambdaBodyNoExpression, self.location);
         }
         Ok(self.locate(ExpressionBody::Procedure(SchemeProcedure(
             formals,
@@ -423,69 +418,51 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
 
     fn condition(&mut self) -> Result<Expression> {
         self.advance(1)?;
-        match (
-            self.parse()?,
-            self.parse()?,
-            self.peek_next_token()?.map(|t| &t.data),
-        ) {
-            (
-                Some(Statement::Expression(test)),
-                Some(Statement::Expression(consequent)),
-                Some(TokenData::RightParen),
-            ) => {
-                self.advance(1)?;
+        let test = self.expression()?;
+        let consequent = self.expression()?;
+        match self.advance_unwrap(1)?.data {
+            TokenData::RightParen => Ok(Expression {
+                data: ExpressionBody::Conditional(Box::new((test, consequent, None))),
+                location: self.location,
+            }),
+            _ => {
+                let alternative = self.current_expression()?;
+                self.expect_next_nth(1, TokenData::RightParen)?;
                 Ok(Expression {
-                    data: ExpressionBody::Conditional(Box::new((test, consequent, None))),
+                    data: ExpressionBody::Conditional(Box::new((
+                        test,
+                        consequent,
+                        Some(alternative),
+                    ))),
                     location: self.location,
                 })
             }
-            (
-                Some(Statement::Expression(test)),
-                Some(Statement::Expression(consequent)),
-                Some(_),
-            ) => match self.parse()? {
-                Some(Statement::Expression(alternative)) => {
-                    self.advance(1)?;
-                    Ok(Expression {
-                        data: ExpressionBody::Conditional(Box::new((
-                            test,
-                            consequent,
-                            Some(alternative),
-                        ))),
-                        location: self.location,
-                    })
-                }
-                other => syntax_error!(
-                    self.location,
-                    "expect condition alternatives, got {:?}",
-                    other
-                ),
-            },
-            _ => syntax_error!(self.location, "conditional syntax error"),
         }
     }
 
     fn import_set(&mut self) -> Result<ImportSet> {
-        let import_declaration = self.location;
-        Ok(match self.current.take() {
-            Some(Token {
+        // let current = self.current;
+        Ok(match self.advance_unwrap_take(0)? {
+            Token {
                 data: TokenData::Identifier(libname),
                 location,
-            }) => Ok(ImportSet {
+            } => ImportSet {
                 data: ImportSetBody::Direct(libname),
                 location,
-            })?,
-            Some(Token {
+            },
+            Token {
                 data: TokenData::LeftParen,
                 location,
-            }) => match self.advance(1)?.take().map(|t| t.data) {
-                Some(TokenData::Identifier(ident)) => match ident.as_str() {
+            } => {
+                let ident = self.next_identifier()?;
+                match ident.as_str() {
                     "only" => {
                         self.advance(1)?;
                         ImportSet {
                             data: ImportSetBody::Only(
                                 Box::new(self.import_set()?),
-                                self.repeat(Self::get_identifier).collect::<Result<_>>()?,
+                                self.repeat(Self::current_identifier)
+                                    .collect::<Result<_>>()?,
                             ),
                             location,
                         }
@@ -495,34 +472,39 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         ImportSet {
                             data: ImportSetBody::Except(
                                 Box::new(self.import_set()?),
-                                self.repeat(Self::get_identifier).collect::<Result<_>>()?,
-                            ),
-                            location,
-                        }
-                    }
-                    "prefix" => match self.advance(2)?.take().map(|t| t.data) {
-                        Some(TokenData::Identifier(identifier)) => ImportSet {
-                            data: ImportSetBody::Prefix(Box::new(self.import_set()?), identifier),
-                            location,
-                        },
-                        _ => syntax_error!(location, "expect a prefix name after import"),
-                    },
-                    "rename" => {
-                        self.advance(1)?;
-                        ImportSet {
-                            data: ImportSetBody::Rename(
-                                Box::new(self.import_set()?),
-                                self.repeat(Self::get_identifier_pair)
+                                self.repeat(Self::current_identifier)
                                     .collect::<Result<_>>()?,
                             ),
                             location,
                         }
                     }
-                    _ => syntax_error!(location, "import: expect sub import set"),
-                },
-                _ => syntax_error!(location, "import: expect library name or sub import sets"),
-            },
-            other => syntax_error!(import_declaration, "expect an import set, got {:?}", other),
+                    "prefix" => {
+                        self.advance(1)?;
+                        ImportSet {
+                            data: ImportSetBody::Prefix(
+                                Box::new(self.import_set()?),
+                                self.next_identifier()?,
+                            ),
+                            location,
+                        }
+                    }
+                    "rename" => {
+                        self.advance(1)?;
+                        ImportSet {
+                            data: ImportSetBody::Rename(
+                                Box::new(self.import_set()?),
+                                self.repeat(Self::current_identifier_pair)
+                                    .collect::<Result<_>>()?,
+                            ),
+                            location,
+                        }
+                    }
+                    _ => return located_error!(SyntaxError::IllegalSubImport, location),
+                }
+            }
+            other => {
+                return located_error!(SyntaxError::UnexpectedToken(other.data), other.location)
+            }
         })
     }
 
@@ -531,37 +513,35 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         let current = self.advance(2)?.take().map(|t| t.data);
         match current {
             Some(TokenData::Identifier(identifier)) => {
-                match (self.parse()?, self.advance(1)?.take().map(|t| t.data)) {
-                    (Some(Statement::Expression(expr)), Some(TokenData::RightParen)) => {
-                        Ok(Definition::from_data(DefinitionBody(identifier, expr)))
-                    }
-                    _ => syntax_error!(location, "define: expect identifier and expression"),
-                }
+                let expr = self.expression()?;
+                self.expect_next_nth(1, TokenData::RightParen)?;
+                Ok(Definition {
+                    data: DefinitionBody(identifier, expr),
+                    location,
+                })
             }
-            Some(TokenData::LeftParen) => match self.advance(1)?.take().map(|t| t.data) {
-                Some(TokenData::Identifier(identifier)) => {
-                    let mut formals = ParameterFormals::new();
-                    match self.peek_next_token()?.map(|t| &t.data) {
-                        Some(TokenData::Period) => {
-                            self.advance(2)?;
-                            formals.1 = Some(self.get_identifier()?);
-                            self.advance(1)?;
-                        }
-                        _ => formals = self.procedure_formals()?,
+            Some(TokenData::LeftParen) => {
+                let identifier = self.next_identifier()?;
+                let mut formals = ParameterFormals::new();
+                match self.peek_next_token()?.map(|t| &t.data) {
+                    Some(TokenData::Period) => {
+                        self.advance(2)?;
+                        formals.1 = Some(self.current_identifier()?);
+                        self.advance(1)?;
                     }
-                    let body = self.procedure_body(formals)?;
-                    Ok(Definition::from_data(DefinitionBody(identifier, body)))
+                    _ => formals = self.procedure_formals()?,
                 }
-                _ => syntax_error!(location, "define: expect identifier and expression"),
-            },
-            _ => syntax_error!(location, "define: expect identifier and expression"),
+                let body = self.procedure_body(formals)?;
+                Ok(Definition::from(DefinitionBody(identifier, body)))
+            }
+            _ => located_error!(SyntaxError::IllegalDefinition, self.location),
         }
     }
 
     fn def_syntax(&mut self) -> Result<SyntaxDef> {
         let location = self.location;
         self.advance(2)?;
-        let keyword = self.get_identifier()?;
+        let keyword = self.current_identifier()?;
         self.expect_next_nth(1, TokenData::LeftParen)?;
         self.expect_next_nth(1, TokenData::Identifier("syntax-rules".to_string()))?;
         let (ellipsis, literals) = match self.advance(1)? {
@@ -569,16 +549,24 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                 data: TokenData::LeftParen,
                 ..
             }) => (None, {
-                self.repeat(Self::get_identifier).collect::<Result<_>>()?
+                self.repeat(Self::current_identifier)
+                    .collect::<Result<_>>()?
             }),
             Some(Token {
                 data: TokenData::Identifier(ellipsis),
                 ..
             }) => (Some(ellipsis.clone()), {
                 self.expect_next_nth(1, TokenData::LeftParen)?;
-                self.repeat(Self::get_identifier).collect::<Result<_>>()?
+                self.repeat(Self::current_identifier)
+                    .collect::<Result<_>>()?
             }),
-            other => syntax_error!(location, "expect literal (identifier), get {:?}", other),
+            Some(other) => {
+                return located_error!(
+                    SyntaxError::UnexpectedToken(other.data.clone()),
+                    other.location
+                )
+            }
+            None => return located_error!(SyntaxError::UnexpectedEnd, self.location),
         };
         let rules = self.repeat(Self::syntax_rule).collect::<Result<_>>()?;
         let syntax = SyntaxDef {
@@ -606,78 +594,84 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 
     fn pattern(&mut self) -> Result<SyntaxPattern> {
-        let pattern = match self.current.take() {
-            Some(token) => {
-                let data = match token.data {
-                    TokenData::Identifier(ident) if ident == "_" => SyntaxPatternBody::Underscore,
-                    TokenData::Identifier(ident) if ident == "." => SyntaxPatternBody::Period,
-                    TokenData::Identifier(ident) if ident == "..." => SyntaxPatternBody::Ellipsis,
-                    TokenData::Identifier(ident) => SyntaxPatternBody::Identifier(ident),
-                    TokenData::Primitive(p) => SyntaxPatternBody::Primitive(p),
-                    TokenData::LeftParen => {
-                        let iter = self.repeat(Self::pattern);
-                        let (mut prefix, mut suffix, mut cdr) = (vec![], vec![], None);
-                        let (mut has_suffix, mut has_cdr) = (false, false);
-                        for element in iter {
-                            let element = element?;
-                            match element.data {
-                                SyntaxPatternBody::Period => {
-                                    if has_cdr {
-                                        syntax_error!(element.location, "unexpected period");
-                                    } else {
-                                        has_cdr = true;
-                                    }
-                                }
-                                SyntaxPatternBody::Ellipsis => {
-                                    if has_suffix {
-                                        syntax_error!(element.location, "unexpected ellipsis");
-                                    } else {
-                                        has_suffix = true;
-                                    }
-                                }
-                                _ => match (has_suffix, has_cdr) {
-                                    (false, false) => prefix.push(element),
-                                    (true, false) => suffix.push(element),
-                                    (_, true) => {
-                                        if cdr.is_some() {
-                                            syntax_error!(element.location, "illegal pair pattern")
-                                        }
-                                        cdr = Some(Box::new(element))
-                                    }
-                                },
+        let token = self.advance_unwrap_take(0)?;
+        let data = match token.data {
+            TokenData::Identifier(ident) if ident == "_" => SyntaxPatternBody::Underscore,
+            TokenData::Identifier(ident) if ident == "." => SyntaxPatternBody::Period,
+            TokenData::Identifier(ident) if ident == "..." => SyntaxPatternBody::Ellipsis,
+            TokenData::Identifier(ident) => SyntaxPatternBody::Identifier(ident),
+            TokenData::Primitive(p) => SyntaxPatternBody::Primitive(p),
+            TokenData::LeftParen => {
+                let iter = self.repeat(Self::pattern);
+                let (mut prefix, mut suffix, mut cdr) = (vec![], vec![], None);
+                let (mut has_suffix, mut has_cdr) = (false, false);
+                for element in iter {
+                    let element = element?;
+                    match element.data {
+                        SyntaxPatternBody::Period => {
+                            if has_cdr {
+                                return located_error!(
+                                    SyntaxError::UnexpectedToken(TokenData::Period),
+                                    element.location
+                                );
+                            }
+                            has_cdr = true;
+                        }
+                        SyntaxPatternBody::Ellipsis => {
+                            if has_suffix {
+                                return located_error!(
+                                    SyntaxError::UnexpectedToken(TokenData::Period),
+                                    element.location
+                                );
+                            } else {
+                                has_suffix = true;
                             }
                         }
-                        SyntaxPatternBody::List(prefix, suffix, cdr)
-                    }
-                    TokenData::VecConsIntro => {
-                        let iter = self.repeat(Self::pattern);
-                        let mut vec = [vec![], vec![]];
-                        let mut has_suffix = 0;
-                        for element in iter {
-                            let element = element?;
-                            match element.data {
-                                SyntaxPatternBody::Period => {
-                                    syntax_error!(element.location, "unexpected period");
+                        _ => match (has_suffix, has_cdr) {
+                            (false, false) => prefix.push(element),
+                            (true, false) => suffix.push(element),
+                            (_, true) => {
+                                if cdr.is_some() {
+                                    return located_error!(
+                                        SyntaxError::IllegalPattern,
+                                        element.location
+                                    );
                                 }
-                                SyntaxPatternBody::Ellipsis => {
-                                    has_suffix = 1;
-                                }
-                                _ => vec[has_suffix].push(element),
+                                cdr = Some(Box::new(element))
                             }
-                        }
-                        let [prefix, suffix] = vec;
-                        SyntaxPatternBody::Vector(prefix, suffix)
+                        },
                     }
-                    o => syntax_error!(self.location, "unrecognized pattern {}", o),
-                };
-                SyntaxPattern {
-                    data,
-                    location: token.location,
                 }
+                SyntaxPatternBody::List(prefix, suffix, cdr)
             }
-            _ => syntax_error!(self.location, "unexpected end of input"),
+            TokenData::VecConsIntro => {
+                let iter = self.repeat(Self::pattern);
+                let mut vec = [vec![], vec![]];
+                let mut has_suffix = 0;
+                for element in iter {
+                    let element = element?;
+                    match element.data {
+                        SyntaxPatternBody::Period => {
+                            return located_error!(
+                                SyntaxError::UnexpectedToken(TokenData::Period),
+                                element.location
+                            )
+                        }
+                        SyntaxPatternBody::Ellipsis => {
+                            has_suffix = 1;
+                        }
+                        _ => vec[has_suffix].push(element),
+                    }
+                }
+                let [prefix, suffix] = vec;
+                SyntaxPatternBody::Vector(prefix, suffix)
+            }
+            o => return located_error!(SyntaxError::UnexpectedToken(o), token.location),
         };
-        Ok(pattern)
+        Ok(SyntaxPattern {
+            data,
+            location: token.location,
+        })
     }
 
     fn template_element(&mut self) -> Result<(SyntaxTemplate, /* with ellipsis */ bool)> {
@@ -701,110 +695,86 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 
     fn template(&mut self) -> Result<SyntaxTemplate> {
-        let tem = match self.current.take() {
-            Some(token) => {
-                let data = match token.data {
-                    TokenData::Identifier(ident) if ident == "..." => SyntaxTemplateBody::Ellipsis,
-                    TokenData::Identifier(ident) if ident == "." => SyntaxTemplateBody::Period,
-                    TokenData::Identifier(ident) => SyntaxTemplateBody::Identifier(ident),
-                    TokenData::Primitive(p) => SyntaxTemplateBody::Primitive(p),
-                    TokenData::LeftParen => {
-                        let iter = self.repeat(Self::template_element);
-                        let mut car = vec![];
-                        let mut cdr = None;
-                        let mut has_tail = false;
-                        for element in iter {
-                            let (element, with_ellipsis) = element?;
-                            match element.data {
-                                SyntaxTemplateBody::Period => {
-                                    if has_tail {
-                                        syntax_error!(element.location, "unexpected period");
-                                    } else {
-                                        has_tail = true;
-                                    }
-                                }
-                                _ => match (&cdr, has_tail, with_ellipsis) {
-                                    (_, false, _) => car.push((element, with_ellipsis)),
-                                    (None, true, false) => cdr = Some(Box::new(element)),
-                                    _ => syntax_error!(element.location, "illegal pair pattern"),
-                                },
+        let token = self.advance_unwrap_take(0)?;
+
+        let data = match token.data {
+            TokenData::Identifier(ident) if ident == "..." => SyntaxTemplateBody::Ellipsis,
+            TokenData::Identifier(ident) if ident == "." => SyntaxTemplateBody::Period,
+            TokenData::Identifier(ident) => SyntaxTemplateBody::Identifier(ident),
+            TokenData::Primitive(p) => SyntaxTemplateBody::Primitive(p),
+            TokenData::LeftParen => {
+                let iter = self.repeat(Self::template_element);
+                let mut car = vec![];
+                let mut cdr = None;
+                let mut has_tail = false;
+                for element in iter {
+                    let (element, with_ellipsis) = element?;
+                    match element.data {
+                        SyntaxTemplateBody::Period => {
+                            if has_tail {
+                                return located_error!(
+                                    SyntaxError::UnexpectedToken(TokenData::Period),
+                                    element.location
+                                );
+                            } else {
+                                has_tail = true;
                             }
                         }
-                        SyntaxTemplateBody::List(car, cdr)
-                    }
-                    TokenData::VecConsIntro => {
-                        let iter = self.repeat(Self::template_element);
-                        let mut vec = vec![];
-                        for element in iter {
-                            let element = element?;
-                            match element.0.data {
-                                SyntaxTemplateBody::Period => {
-                                    syntax_error!(element.0.location, "unexpected period")
-                                }
-                                _ => vec.push(element),
+                        _ => match (&cdr, has_tail, with_ellipsis) {
+                            (_, false, _) => car.push((element, with_ellipsis)),
+                            (None, true, false) => cdr = Some(Box::new(element)),
+                            _ => {
+                                return located_error!(
+                                    SyntaxError::IllegalPattern,
+                                    element.location
+                                )
                             }
-                        }
-                        SyntaxTemplateBody::Vector(vec)
+                        },
                     }
-                    o => syntax_error!(self.location, "unrecognized template {}", o),
-                };
-                SyntaxTemplate {
-                    data,
-                    location: self.location,
                 }
+                SyntaxTemplateBody::List(car, cdr)
             }
-            None => syntax_error!(self.location, "unexpect end of input"),
+            TokenData::VecConsIntro => {
+                let iter = self.repeat(Self::template_element);
+                let mut vec = vec![];
+                for element in iter {
+                    let element = element?;
+                    match element.0.data {
+                        SyntaxTemplateBody::Period => {
+                            return located_error!(
+                                SyntaxError::UnexpectedToken(TokenData::Period),
+                                element.0.location
+                            )
+                        }
+                        _ => vec.push(element),
+                    }
+                }
+                SyntaxTemplateBody::Vector(vec)
+            }
+            o => return located_error!(SyntaxError::UnexpectedToken(o), self.location),
         };
-        Ok(tem)
+        Ok(SyntaxTemplate {
+            data,
+            location: self.location,
+        })
     }
 
     fn assginment(&mut self) -> Result<Expression> {
         let location = self.location;
-        let current = self.advance(2)?.take().map(|t| t.data);
-        match current {
-            Some(TokenData::Identifier(identifier)) => {
-                match (self.parse()?, self.advance(1)?.take().map(|t| t.data)) {
-                    (Some(Statement::Expression(expr)), Some(TokenData::RightParen)) => {
-                        Ok(self.locate(ExpressionBody::Assignment(identifier, Box::new(expr))))
-                    }
-                    _ => syntax_error!(location, "define: expect identifier and expression"),
-                }
-            }
-            Some(TokenData::LeftParen) => match self.advance(1)?.take().map(|t| t.data) {
-                Some(TokenData::Identifier(identifier)) => {
-                    let formals = self.procedure_formals()?;
-                    let body = Box::new(self.procedure_body(formals)?);
-                    Ok(self.locate(ExpressionBody::Assignment(identifier, body)))
-                }
-                _ => syntax_error!(location, "set!: expect identifier and expression"),
-            },
-            _ => syntax_error!(location, "set!: expect identifier and expression"),
-        }
+        self.advance(2)?;
+        let symbol = self.current_identifier()?;
+        let value = self.expression()?;
+        self.expect_next_nth(1, TokenData::RightParen)?;
+        Ok(ExpressionBody::Assignment(symbol, Box::new(value)).locate(location))
     }
 
     fn procedure_call(&mut self) -> Result<Expression> {
-        match self.parse()? {
-            Some(Statement::Expression(operator)) => {
-                let mut arguments: Vec<Expression> = vec![];
-                loop {
-                    match self.peek_next_token()?.map(|t| &t.data) {
-                        Some(TokenData::RightParen) => {
-                            self.advance(1)?;
-                            return Ok(self.locate(ExpressionBody::ProcedureCall(
-                                Box::new(operator),
-                                arguments,
-                            )));
-                        }
-                        None => syntax_error!(self.location, "Unmatched Parentheses!"),
-                        _ => arguments.push(match self.parse()? {
-                            Some(Statement::Expression(subexpr)) => subexpr,
-                            _ => syntax_error!(self.location, "Unmatched Parentheses!"),
-                        }),
-                    }
-                }
-            }
-            _ => syntax_error!(self.location, "operator should be an expression"),
-        }
+        let location = self.location;
+        let operator = self.expression()?;
+        let arguments = self
+            .repeat(Self::current_expression)
+            .collect::<Result<Vec<Expression>>>()?;
+        Ok(ExpressionBody::ProcedureCall(Box::new(operator), arguments).locate(location))
     }
 
     fn advance(&mut self, count: usize) -> Result<&mut Option<Token>> {
@@ -818,11 +788,36 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         Ok(&mut self.current)
     }
 
+    fn advance_unwrap<'a>(&'a mut self, count: usize) -> Result<&'a mut Token> {
+        let location = self.location;
+        let token = self.advance(count)?;
+        match token {
+            Some(tok) => Ok(tok),
+            None => located_error!(SyntaxError::UnexpectedEnd, location),
+        }
+    }
+
+    fn advance_unwrap_take(&mut self, count: usize) -> Result<Token> {
+        let token = self.advance(count)?.take();
+        match token {
+            Some(tok) => Ok(tok),
+            None => located_error!(SyntaxError::UnexpectedEnd, self.location),
+        }
+    }
+
+    // fn advance_unwrap(&mut self, count: usize) -> Result<&mut Token> {
+    //     let token = self.advance(count)?;
+    //     match token {
+    //         Some(tok) => Ok(tok),
+    //         None => located_error!(SyntaxError::UnexpectedEnd, self.location),
+    //     }
+    // }
+
     fn peek_next_token(&mut self) -> Result<Option<&Token>> {
         match self.lexer.peek() {
             Some(ret) => match ret {
                 Ok(t) => Ok(Some(t)),
-                Err(e) => Err(e.clone()),
+                Err(e) => Err((*e).clone()),
             },
             None => Ok(None),
         }
@@ -862,11 +857,11 @@ fn empty() -> Result<()> {
 }
 
 fn expr_body_to_statement(t: ExpressionBody) -> Option<Statement> {
-    Some(Located::from_data(t).into())
+    Some(Located::from(t).into())
 }
 
 fn def_body_to_statement(t: DefinitionBody) -> Option<Statement> {
-    Some(Located::from_data(t).into())
+    Some(Located::from(t).into())
 }
 
 #[cfg(test)]
@@ -1000,11 +995,7 @@ fn unmatched_parantheses() {
     let mut parser = token_stream_to_parser(tokens.into_iter());
     assert_eq!(
         parser.parse(),
-        Err(SchemeError {
-            category: ErrorType::Syntax,
-            message: "Unmatched Parentheses!".to_string(),
-            location: None
-        })
+        located_error!(SyntaxError::UnexpectedEnd, None)
     );
 }
 
@@ -1187,7 +1178,7 @@ fn lambda() -> Result<()> {
             Some(Statement::Expression(
                 ExpressionBody::Procedure(SchemeProcedure(
                     ParameterFormals(vec!["x".to_string()], None),
-                    vec![Definition::from_data(DefinitionBody(
+                    vec![Definition::from(DefinitionBody(
                         "y".to_string(),
                         Primitive::Integer(1).into()
                     ))],
@@ -1223,11 +1214,7 @@ fn lambda() -> Result<()> {
         let err = parser.parse();
         assert_eq!(
             err,
-            Err(SchemeError {
-                category: ErrorType::Syntax,
-                message: "no expression in procedure body".to_string(),
-                location: None
-            })
+            located_error!(SyntaxError::LambdaBodyNoExpression, None)
         );
     }
 
@@ -1331,13 +1318,13 @@ fn import_declaration() -> Result<()> {
             ast,
             Some(Statement::ImportDeclaration(convert_located(vec![
                 ImportSetBody::Only(
-                    Box::new(ImportSet::from_data(ImportSetBody::Direct(
+                    Box::new(ImportSet::from(ImportSetBody::Direct(
                         "example-lib".to_string()
                     ))),
                     vec!["a".to_string(), "b".to_string()]
                 ),
                 ImportSetBody::Rename(
-                    Box::new(ImportSet::from_data(ImportSetBody::Direct(
+                    Box::new(ImportSet::from(ImportSetBody::Direct(
                         "example-lib".to_string()
                     ))),
                     vec![("old".to_string(), "new".to_string())]

@@ -2,7 +2,7 @@ use pair::Pair;
 
 use crate::values::*;
 use crate::{environment::*, interpreter::*};
-use crate::{error::ErrorType, parser::ParameterFormals};
+use crate::{error::ErrorData, error::ToLocated, parser::ParameterFormals};
 use std::{collections::HashMap, rc::Rc};
 
 fn apply<R: RealNumberInternalTrait, E: IEnvironment<R>>(
@@ -17,7 +17,7 @@ fn apply<R: RealNumberInternalTrait, E: IEnvironment<R>>(
         let extended = match extended {
             Value::Pair(p) => p.into_iter().collect::<Result<ArgVec<R, E>>>()?,
             Value::EmptyList => ArgVec::new(),
-            other => logic_error!("{} is not a proper list", other),
+            _ => unreachable!(),
         };
 
         args.extend(extended);
@@ -293,11 +293,7 @@ fn buildin_div() {
         ];
         assert_eq!(
             div(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "division by exact zero".to_string(),
-            })
+            Err(ErrorData::Logic(LogicError::DivisionByZero).no_locate())
         );
     }
 }
@@ -368,7 +364,7 @@ fn make_vector<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     let mut iter = arguments.into_iter();
     let k = iter.next().unwrap().expect_integer()?;
     if k < 0 {
-        logic_error!("expect a non-negative length");
+        return error!(LogicError::NegativeLength);
     }
     let fill = iter.next().unwrap();
     Ok(Value::Vector(ValueReference::new_mutable(vec![
@@ -402,14 +398,7 @@ fn buildin_make_vector() {
     {
         let arguments: Vec<Value<f32, StandardEnv<_>>> =
             vec![Value::Number(Number::Integer(-1)), Value::Boolean(true)];
-        assert_eq!(
-            make_vector(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "expect a non-negative length".to_string()
-            })
-        );
+        assert_eq!(make_vector(arguments), error!(LogicError::NegativeLength));
     }
 }
 
@@ -455,7 +444,7 @@ fn vector_ref<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     let k = iter.next().unwrap().expect_integer()?;
     let r = match vector.as_ref().get(k as usize) {
         Some(value) => Ok(value.clone()),
-        None => logic_error!("vector index out of bound"),
+        None => return error!(LogicError::VectorIndexOutOfBounds),
     };
     r
 }
@@ -486,11 +475,7 @@ fn buildin_vector_ref() {
         let arguments = vec![vector.clone(), Value::Number(Number::Integer(3))];
         assert_eq!(
             vector_ref(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "vector index out of bound".to_string(),
-            })
+            Err(ErrorData::Logic(LogicError::VectorIndexOutOfBounds).no_locate())
         );
     }
 }
@@ -503,7 +488,7 @@ fn vector_set<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     let k = iter.next().unwrap().expect_integer()?;
     let obj = iter.next().unwrap();
     match vector.as_mut()?.get_mut(k as usize) {
-        None => logic_error!("vector index out of bound"),
+        None => return Err(ErrorData::Logic(LogicError::VectorIndexOutOfBounds).no_locate()),
         Some(value) => {
             *value = obj;
         }
@@ -574,11 +559,7 @@ fn buildin_vector_set() -> Result<()> {
         ];
         assert_eq!(
             vector_set(arguments),
-            Err(SchemeError {
-                location: None,
-                category: ErrorType::Logic,
-                message: "vector index out of bound".to_string(),
-            })
+            error!(LogicError::VectorIndexOutOfBounds)
         );
     }
     Ok(())
