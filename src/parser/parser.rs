@@ -346,11 +346,9 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
             Some(TokenData::LeftParen) => {
                 self.advance(1)?;
                 self.expect_next_nth(0, TokenData::Identifier("rename".to_string()))?;
-                self.advance(1)?;
-                let from = self.current_identifier()?;
-                self.advance(1)?;
-                let to = self.current_identifier()?;
-                self.advance(1)?;
+                let from = self.next_identifier()?;
+                let to = self.next_identifier()?;
+                self.expect_next_nth(1, TokenData::RightParen)?;
                 Ok(Located::from(ExportSpec::Rename(from, to)))
             }
             Some(TokenData::Identifier(identifier)) => {
