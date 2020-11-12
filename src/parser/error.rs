@@ -37,5 +37,6 @@ pub enum SyntaxError {
     IllegalDefinition,
     #[error("invalid context for definition {0:?}")]
     InvalidDefinitionContext(DefinitionBody),
-    // VariableParameter,
+    #[error("{0}")]
+    Extension(String),
 }

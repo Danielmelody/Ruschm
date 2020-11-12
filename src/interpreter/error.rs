@@ -33,4 +33,6 @@ pub enum LogicError {
     RequiresMutable(String),
     #[error(transparent)]
     MetaCircularSyntax(#[from] SyntaxError),
+    #[error("{0}")]
+    Extension(String),
 }
