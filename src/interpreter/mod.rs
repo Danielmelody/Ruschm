@@ -1,7 +1,8 @@
+#[macro_use]
+pub mod library;
 type Result<T> = std::result::Result<T, SchemeError>;
 mod interpreter;
 pub mod pair;
-pub mod scheme;
 
 use error::LogicError;
 pub use interpreter::*;

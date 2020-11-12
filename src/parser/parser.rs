@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 use super::Result;
+use crate::interpreter::library::LibraryName;
 use crate::parser::lexer::TokenData;
-use crate::{error::*, parser::lexer::Token};
+use crate::{error::*, interpreter::library::LibraryNameElement, parser::lexer::Token};
 use fmt::Display;
 use itertools::join;
-use std::fmt;
 use std::iter::{repeat, Iterator, Peekable};
+use std::{fmt, ops::Deref};
 
 use super::{
     error::SyntaxError, Primitive, SyntaxPattern, SyntaxPatternBody, SyntaxTemplate,
@@ -19,11 +20,36 @@ pub(crate) fn join_displayable(iter: impl IntoIterator<Item = impl fmt::Display>
 }
 
 #[derive(PartialEq, Debug, Clone)]
+pub struct LibraryDefinition(
+    pub Located<LibraryName>,
+    pub Vec<Located<LibraryDeclaration>>,
+);
+impl ToLocated for LibraryDefinition {}
+#[derive(PartialEq, Debug, Clone)]
+pub enum LibraryDeclaration {
+    ImportDeclaration(Located<ImportDeclaration>),
+    Export(Vec<Located<ExportSpec>>),
+    Begin(Vec<Statement>),
+}
+impl ToLocated for LibraryDeclaration {}
+#[derive(PartialEq, Debug, Clone)]
+pub enum ExportSpec {
+    Direct(String),
+    Rename(String, String),
+}
+impl ToLocated for ExportSpec {}
+#[derive(PartialEq, Debug, Clone)]
+pub struct ImportDeclaration(pub Vec<ImportSet>);
+
+impl ToLocated for ImportDeclaration {}
+
+#[derive(PartialEq, Debug, Clone)]
 pub enum Statement {
-    ImportDeclaration(Vec<ImportSet>),
+    ImportDeclaration(Located<ImportDeclaration>),
     Definition(Definition),
     SyntaxDefinition(SyntaxDef),
     Expression(Expression),
+    LibraryDefinition(Located<LibraryDefinition>),
 }
 
 impl Into<Statement> for Expression {
@@ -44,8 +70,22 @@ impl Into<Statement> for Definition {
     }
 }
 
+impl Into<Statement> for Located<ImportDeclaration> {
+    fn into(self) -> Statement {
+        Statement::ImportDeclaration(self)
+    }
+}
+
+impl Into<Statement> for Located<LibraryDefinition> {
+    fn into(self) -> Statement {
+        Statement::LibraryDefinition(self)
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct DefinitionBody(pub String, pub Expression);
+
+impl ToLocated for DefinitionBody {}
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct SyntaxDefBody(pub String, pub Transformer);
@@ -56,12 +96,14 @@ pub type ImportSet = Located<ImportSetBody>;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum ImportSetBody {
-    Direct(String),
+    Direct(Located<LibraryName>),
     Only(Box<ImportSet>, Vec<String>),
     Except(Box<ImportSet>, Vec<String>),
     Prefix(Box<ImportSet>, String),
     Rename(Box<ImportSet>, Vec<(String, String)>),
 }
+
+impl ToLocated for ImportSetBody {}
 
 pub type Expression = Located<ExpressionBody>;
 #[derive(PartialEq, Debug, Clone)]
@@ -155,7 +197,6 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
             location: None,
         }
     }
-
     pub fn parse_current(&mut self) -> Result<Option<Statement>> {
         match self.current.take() {
             Some(Token { data, location }) => Ok(Some(match data {
@@ -183,6 +224,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         }
                         "define" => self.definition()?.into(),
                         "define-syntax" => self.def_syntax()?.into(),
+                        "define-library" => self.library()?.into(),
                         "set!" => self.assginment()?.into(),
                         "import" => self.import_declaration()?.into(),
                         "if" => self.condition()?.into(),
@@ -216,12 +258,10 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     pub fn current_expression(&mut self) -> Result<Expression> {
         match self.parse_current()? {
             Some(Statement::Expression(expr)) => Ok(expr),
-            _ => {
-                return located_error!(
-                    SyntaxError::ExpectSomething("expression".to_owned()),
-                    self.location
-                )
-            }
+            _ => located_error!(
+                SyntaxError::ExpectSomething("expression".to_owned()),
+                self.location
+            ),
         }
     }
 
@@ -231,9 +271,94 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
             .and_then(|statement| Some((statement, self.location))))
     }
 
+    fn statement(&mut self) -> Result<Statement> {
+        match self.parse_current()? {
+            Some(statement) => Ok(statement),
+            None => located_error!(SyntaxError::UnexpectedEnd, self.location),
+        }
+    }
     pub fn parse(&mut self) -> Result<Option<Statement>> {
         self.advance(1)?;
         self.parse_current()
+    }
+    fn library(&mut self) -> Result<Located<LibraryDefinition>> {
+        let location = self.location;
+        self.advance(2)?;
+        match self.current.as_ref().map(Deref::deref) {
+            Some(TokenData::LeftParen) => {
+                let library_name = self.library_name()?;
+                let library_declarations: Result<Vec<_>> =
+                    self.repeat(Self::library_declaration).collect();
+                Ok(LibraryDefinition(library_name, library_declarations?).locate(location))
+            }
+            other => located_error!(
+                SyntaxError::TokenMisMatch(TokenData::LeftParen, other.map(Clone::clone)),
+                self.location
+            ),
+        }
+    }
+
+    fn library_declaration(&mut self) -> Result<Located<LibraryDeclaration>> {
+        let location = self.location;
+        match self.current.take().map(Located::extract_data) {
+            Some(TokenData::LeftParen) => {
+                let token = self.peek_next_token()?;
+                match token.map(Deref::deref) {
+                    Some(TokenData::Identifier(identifier)) => match identifier.as_str() {
+                        "import" => Ok(LibraryDeclaration::ImportDeclaration(
+                            self.import_declaration()?,
+                        )
+                        .locate(location)),
+                        "export" => {
+                            self.advance(1)?;
+                            Ok(Located::from(LibraryDeclaration::Export(
+                                self.repeat(Self::export_spec).collect::<Result<Vec<_>>>()?,
+                            )))
+                        }
+                        "begin" => {
+                            self.advance(1)?;
+                            Ok(Located::from(LibraryDeclaration::Begin(
+                                self.repeat(Self::statement).collect::<Result<Vec<_>>>()?,
+                            )))
+                        }
+                        _ => located_error!(
+                            SyntaxError::ExpectSomething("import/export/begin".to_string()),
+                            token.unwrap().location
+                        ),
+                    },
+                    Some(_) => located_error!(
+                        SyntaxError::ExpectSomething("import/export/begin".to_string()),
+                        token.unwrap().location
+                    ),
+                    None => located_error!(SyntaxError::UnexpectedEnd, location),
+                }
+            }
+            other => located_error!(
+                SyntaxError::TokenMisMatch(TokenData::LeftParen, other),
+                location
+            ),
+        }
+    }
+
+    fn export_spec(&mut self) -> Result<Located<ExportSpec>> {
+        let location = self.location;
+        match self.current.take().map(Located::extract_data) {
+            Some(TokenData::LeftParen) => {
+                self.advance(1)?;
+                self.expect_next_nth(0, TokenData::Identifier("rename".to_string()))?;
+                self.advance(1)?;
+                let from = self.current_identifier()?;
+                self.advance(1)?;
+                let to = self.current_identifier()?;
+                self.advance(1)?;
+                Ok(Located::from(ExportSpec::Rename(from, to)))
+            }
+            Some(TokenData::Identifier(identifier)) => {
+                Ok(Located::from(ExportSpec::Direct(identifier)))
+            }
+            Some(other) => located_error!(SyntaxError::UnexpectedToken(other), location),
+            None => located_error!(SyntaxError::UnexpectedEnd, location),
+        }
     }
 
     fn expression(&mut self) -> Result<Expression> {
@@ -409,11 +534,13 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         ))))
     }
 
-    fn import_declaration(&mut self) -> Result<Statement> {
+    fn import_declaration(&mut self) -> Result<Located<ImportDeclaration>> {
+        let location = self.location;
         self.expect_next_nth(1, TokenData::Identifier("import".to_string()))?;
-        Ok(Statement::ImportDeclaration(
-            self.repeat(Self::import_set).collect::<Result<_>>()?,
-        ))
+        Ok(
+            ImportDeclaration(self.repeat(Self::import_set).collect::<Result<_>>()?)
+                .locate(location),
+        )
     }
 
     fn condition(&mut self) -> Result<Expression> {
@@ -440,24 +567,53 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         }
     }
 
-    fn import_set(&mut self) -> Result<ImportSet> {
-        // let current = self.current;
-        Ok(match self.advance_unwrap_take(0)? {
-            Token {
-                data: TokenData::Identifier(libname),
-                location,
-            } => ImportSet {
-                data: ImportSetBody::Direct(libname),
-                location,
+    fn library_name_element(&mut self) -> Result<Located<LibraryNameElement>> {
+        let location = self.location;
+        match self.current.take() {
+            Some(token) => match token.data {
+                TokenData::Identifier(identifier) => {
+                    Ok(LibraryNameElement::Identifier(identifier).locate(self.location))
+                }
+                TokenData::Primitive(Primitive::Integer(i)) => {
+                    if i >= 0 {
+                        Ok(LibraryNameElement::Integer(i as u32).locate(self.location))
+                    } else {
+                        located_error!(
+                            SyntaxError::ExpectSomething("non-negative integer".to_string()),
+                            location
+                        )
+                    }
+                }
+                token => located_error!(SyntaxError::UnexpectedToken(token), self.location),
             },
-            Token {
-                data: TokenData::LeftParen,
-                location,
-            } => {
-                let ident = self.next_identifier()?;
-                match ident.as_str() {
+            None => located_error!(SyntaxError::UnexpectedEnd, self.location),
+        }
+    }
+    fn library_name(&mut self) -> Result<Located<LibraryName>> {
+        let location = self.location;
+        match self.current.take().map(Located::extract_data) {
+            Some(TokenData::LeftParen) => Ok(LibraryName(
+                self.repeat(Self::library_name_element)
+                    .collect::<Result<Vec<Located<LibraryNameElement>>>>()?
+                    .into_iter()
+                    .map(Located::extract_data)
+                    .collect(),
+            )
+            .locate(location)),
+            other => located_error!(
+                SyntaxError::TokenMisMatch(TokenData::LeftParen, other),
+                location
+            )?,
+        }
+    }
+
+    fn import_set(&mut self) -> Result<ImportSet> {
+        let location = self.location;
+        Ok(match self.current.as_ref().map(Deref::deref) {
+            Some(TokenData::LeftParen) => match self.peek_next_token()?.map(|token| &token.data) {
+                Some(TokenData::Identifier(ident)) => match ident.as_str() {
                     "only" => {
-                        self.advance(1)?;
+                        self.advance(2)?;
                         ImportSet {
                             data: ImportSetBody::Only(
                                 Box::new(self.import_set()?),
@@ -468,7 +624,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         }
                     }
                     "except" => {
-                        self.advance(1)?;
+                        self.advance(2)?;
                         ImportSet {
                             data: ImportSetBody::Except(
                                 Box::new(self.import_set()?),
@@ -479,7 +635,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         }
                     }
                     "prefix" => {
-                        self.advance(1)?;
+                        self.advance(2)?;
                         ImportSet {
                             data: ImportSetBody::Prefix(
                                 Box::new(self.import_set()?),
@@ -489,7 +645,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                         }
                     }
                     "rename" => {
-                        self.advance(1)?;
+                        self.advance(2)?;
                         ImportSet {
                             data: ImportSetBody::Rename(
                                 Box::new(self.import_set()?),
@@ -499,12 +655,14 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                             location,
                         }
                     }
-                    _ => return located_error!(SyntaxError::IllegalSubImport, location),
-                }
-            }
-            other => {
-                return located_error!(SyntaxError::UnexpectedToken(other.data), other.location)
-            }
+                    _ => ImportSetBody::Direct(self.library_name()?).locate(location),
+                },
+                _ => ImportSetBody::Direct(self.library_name()?).locate(location),
+            },
+            other => located_error!(
+                SyntaxError::TokenMisMatch(TokenData::LeftParen, other.map(Clone::clone)),
+                location
+            )?,
         })
     }
 
@@ -1285,9 +1443,127 @@ fn conditional() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn import_set() -> Result<()> {
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("foo".to_string()),
+            TokenData::Primitive(Primitive::Integer(5)),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let import_set = parser.import_set()?;
+        assert_eq!(
+            import_set.data,
+            ImportSetBody::Direct(library_name!("foo", 5).no_locate())
+        );
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("only".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("foo".to_string()),
+            TokenData::Primitive(Primitive::Integer(5)),
+            TokenData::RightParen,
+            TokenData::Identifier("a".to_string()),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let import_set = parser.import_set()?;
+        assert_eq!(
+            import_set.data,
+            ImportSetBody::Only(
+                Box::new(ImportSetBody::Direct(library_name!("foo", 5).no_locate()).no_locate()),
+                vec!["a".to_string()]
+            )
+        );
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("except".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("foo".to_string()),
+            TokenData::Primitive(Primitive::Integer(5)),
+            TokenData::RightParen,
+            TokenData::Identifier("a".to_string()),
+            TokenData::Identifier("b".to_string()),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let import_set = parser.import_set()?;
+        assert_eq!(
+            import_set.data,
+            ImportSetBody::Except(
+                Box::new(ImportSetBody::Direct(library_name!("foo", 5).no_locate()).no_locate()),
+                vec!["a".to_string(), "b".to_string()]
+            )
+        );
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("prefix".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("foo".to_string()),
+            TokenData::Primitive(Primitive::Integer(5)),
+            TokenData::RightParen,
+            TokenData::Identifier("a-".to_string()),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let import_set = parser.import_set()?;
+        assert_eq!(
+            import_set.data,
+            ImportSetBody::Prefix(
+                Box::new(ImportSetBody::Direct(library_name!("foo", 5).no_locate()).no_locate()),
+                "a-".to_string()
+            )
+        );
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("rename".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("foo".to_string()),
+            TokenData::Primitive(Primitive::Integer(5)),
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("a".to_string()),
+            TokenData::Identifier("b".to_string()),
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("c".to_string()),
+            TokenData::Identifier("d".to_string()),
+            TokenData::RightParen,
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let import_set = parser.import_set()?;
+        assert_eq!(
+            import_set.data,
+            ImportSetBody::Rename(
+                Box::new(ImportSetBody::Direct(library_name!("foo", 5).no_locate()).no_locate()),
+                vec![
+                    ("a".to_string(), "b".to_string()),
+                    ("c".to_string(), "d".to_string()),
+                ]
+            )
+        );
+    }
+    Ok(())
+}
 /* (import
-(only example-lib a b)
-(rename example-lib (old new))
+(only (example-lib) a b)
+(rename (example-lib) (old new))
 ) */
 #[test]
 fn import_declaration() -> Result<()> {
@@ -1297,13 +1573,17 @@ fn import_declaration() -> Result<()> {
             TokenData::Identifier("import".to_string()),
             TokenData::LeftParen,
             TokenData::Identifier("only".to_string()),
+            TokenData::LeftParen,
             TokenData::Identifier("example-lib".to_string()),
+            TokenData::RightParen,
             TokenData::Identifier("a".to_string()),
             TokenData::Identifier("b".to_string()),
             TokenData::RightParen,
             TokenData::LeftParen,
             TokenData::Identifier("rename".to_string()),
+            TokenData::LeftParen,
             TokenData::Identifier("example-lib".to_string()),
+            TokenData::RightParen,
             TokenData::LeftParen,
             TokenData::Identifier("old".to_string()),
             TokenData::Identifier("new".to_string()),
@@ -1316,20 +1596,36 @@ fn import_declaration() -> Result<()> {
         let ast = parser.parse()?;
         assert_eq!(
             ast,
-            Some(Statement::ImportDeclaration(convert_located(vec![
-                ImportSetBody::Only(
-                    Box::new(ImportSet::from(ImportSetBody::Direct(
-                        "example-lib".to_string()
-                    ))),
-                    vec!["a".to_string(), "b".to_string()]
-                ),
-                ImportSetBody::Rename(
-                    Box::new(ImportSet::from(ImportSetBody::Direct(
-                        "example-lib".to_string()
-                    ))),
-                    vec![("old".to_string(), "new".to_string())]
-                )
-            ])))
+            Some(
+                ImportDeclaration(convert_located(vec![
+                    ImportSetBody::Only(
+                        Box::new(
+                            ImportSetBody::Direct(
+                                LibraryName(vec![LibraryNameElement::Identifier(
+                                    "example-lib".to_string()
+                                )])
+                                .into()
+                            )
+                            .into()
+                        ),
+                        vec!["a".to_string(), "b".to_string()]
+                    ),
+                    ImportSetBody::Rename(
+                        Box::new(
+                            ImportSetBody::Direct(
+                                LibraryName(vec![LibraryNameElement::Identifier(
+                                    "example-lib".to_string()
+                                )])
+                                .into()
+                            )
+                            .into()
+                        ),
+                        vec![("old".to_string(), "new".to_string())]
+                    )
+                ]))
+                .no_locate()
+                .into()
+            )
         );
     }
     Ok(())
@@ -1472,4 +1768,290 @@ fn syntax() -> Result<()> {
         )]
     );
     Ok(())
+}
+
+#[test]
+fn library_name() -> Result<()> {
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("f".to_string()),
+            TokenData::Primitive(Primitive::Integer(5)),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let library_name = parser.library_name()?;
+        assert_eq!(library_name.data, library_name!("f", 5));
+    }
+    {
+        let tokens = convert_located(vec![TokenData::Identifier("f".to_string())]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        assert!(parser.library_name().is_err());
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("f".to_string()),
+            TokenData::Primitive(Primitive::Integer(-5)),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        assert!(parser.library_name().is_err());
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("f".to_string()),
+            TokenData::Primitive(Primitive::Integer(5)),
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        assert!(parser.library_name().is_err());
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::Identifier("f".to_string()),
+            TokenData::Primitive(Primitive::Integer(5)),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        assert!(parser.library_name().is_err());
+    }
+    Ok(())
+}
+#[test]
+fn export_spec() -> Result<()> {
+    {
+        let tokens = convert_located(vec![TokenData::Identifier("a".to_string())]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let export_spec = parser.export_spec()?;
+        assert_eq!(export_spec.data, ExportSpec::Direct("a".to_string()));
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("rename".to_string()),
+            TokenData::Identifier("a".to_string()),
+            TokenData::Identifier("b".to_string()),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let export_spec = parser.export_spec()?;
+        assert_eq!(
+            export_spec.data,
+            ExportSpec::Rename("a".to_string(), "b".to_string())
+        );
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("c".to_string()),
+            TokenData::Identifier("a".to_string()),
+            TokenData::Identifier("b".to_string()),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        assert!(parser.export_spec().is_err());
+    }
+    Ok(())
+}
+#[test]
+fn library_declaration() -> Result<()> {
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("import".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("a".to_string()),
+            TokenData::Identifier("b".to_string()),
+            TokenData::RightParen,
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let library_declaration = parser.library_declaration()?;
+        assert_eq!(
+            library_declaration.data,
+            LibraryDeclaration::ImportDeclaration(
+                ImportDeclaration(vec![ImportSetBody::Direct(
+                    library_name!("a", "b").no_locate()
+                )
+                .no_locate()])
+                .no_locate()
+            )
+        );
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("export".to_string()),
+            TokenData::Identifier("a".to_string()),
+            TokenData::Identifier("b".to_string()),
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let library_declaration = parser.library_declaration()?;
+        assert_eq!(
+            library_declaration.data,
+            LibraryDeclaration::Export(vec![
+                ExportSpec::Direct("a".to_string()).no_locate(),
+                ExportSpec::Direct("b".to_string()).no_locate()
+            ])
+        );
+    }
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("begin".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("define".to_string()),
+            TokenData::Identifier("s".to_string()),
+            TokenData::Primitive(Primitive::String("a".to_string())),
+            TokenData::RightParen,
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        parser.advance(1)?;
+        let library_declaration = parser.library_declaration()?;
+        assert_eq!(
+            library_declaration.data,
+            LibraryDeclaration::Begin(vec![Statement::Definition(
+                DefinitionBody(
+                    "s".to_string(),
+                    ExpressionBody::Primitive(Primitive::String("a".to_string())).no_locate()
+                )
+                .no_locate()
+            )])
+        );
+    }
+    Ok(())
+}
+/*
+(define-library (lib-a 0 base)
+    (import (lib-b))
+    (begin
+        (define c 0)
+        (define d 1)
+    )
+    (export c (rename d e) f)
+    (begin
+        (define f 2)
+    )
+)
+*/
+#[test]
+fn library() {
+    {
+        let tokens = convert_located(vec![
+            TokenData::LeftParen,
+            TokenData::Identifier("define-library".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("lib-a".to_string()),
+            TokenData::Primitive(Primitive::Integer(0)),
+            TokenData::Identifier("base".to_string()),
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("import".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("lib-b".to_string()),
+            TokenData::RightParen,
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("begin".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("define".to_string()),
+            TokenData::Identifier("c".to_string()),
+            TokenData::Primitive(Primitive::Integer(0)),
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("define".to_string()),
+            TokenData::Identifier("d".to_string()),
+            TokenData::Primitive(Primitive::Integer(1)),
+            TokenData::RightParen,
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("export".to_string()),
+            TokenData::Identifier("c".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("rename".to_string()),
+            TokenData::Identifier("d".to_string()),
+            TokenData::Identifier("e".to_string()),
+            TokenData::RightParen,
+            TokenData::Identifier("f".to_string()),
+            TokenData::RightParen,
+            TokenData::LeftParen,
+            TokenData::Identifier("begin".to_string()),
+            TokenData::LeftParen,
+            TokenData::Identifier("define".to_string()),
+            TokenData::Identifier("f".to_string()),
+            TokenData::Primitive(Primitive::Integer(2)),
+            TokenData::RightParen,
+            TokenData::RightParen,
+            TokenData::RightParen,
+        ]);
+        let mut parser = token_stream_to_parser(tokens.into_iter());
+        let ast = parser.parse();
+
+        assert_eq!(
+            ast,
+            Ok(Some(Statement::LibraryDefinition(
+                LibraryDefinition(
+                    library_name!("lib-a", 0, "base").into(),
+                    vec![
+                        LibraryDeclaration::ImportDeclaration(
+                            ImportDeclaration(vec![ImportSetBody::Direct(
+                                LibraryName(vec![LibraryNameElement::Identifier(
+                                    "lib-b".to_string()
+                                )])
+                                .into()
+                            )
+                            .into()])
+                            .no_locate()
+                        )
+                        .into(),
+                        LibraryDeclaration::Begin(vec![
+                            Statement::Definition(
+                                DefinitionBody(
+                                    "c".to_string(),
+                                    ExpressionBody::Primitive(Primitive::Integer(0)).into()
+                                )
+                                .into()
+                            ),
+                            Statement::Definition(
+                                DefinitionBody(
+                                    "d".to_string(),
+                                    ExpressionBody::Primitive(Primitive::Integer(1)).into()
+                                )
+                                .into()
+                            )
+                        ])
+                        .into(),
+                        LibraryDeclaration::Export(vec![
+                            ExportSpec::Direct("c".to_string()).into(),
+                            ExportSpec::Rename("d".to_string(), "e".to_string()).into(),
+                            ExportSpec::Direct("f".to_string()).into(),
+                        ])
+                        .into(),
+                        LibraryDeclaration::Begin(vec![Statement::Definition(
+                            DefinitionBody(
+                                "f".to_string(),
+                                ExpressionBody::Primitive(Primitive::Integer(2)).into()
+                            )
+                            .into()
+                        ),])
+                        .into()
+                    ]
+                )
+                .no_locate()
+            )))
+        )
+    }
 }

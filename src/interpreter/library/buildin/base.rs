@@ -1,9 +1,13 @@
 use pair::Pair;
 
-use crate::values::*;
 use crate::{environment::*, interpreter::*};
 use crate::{error::ErrorData, error::ToLocated, parser::ParameterFormals};
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use crate::{
+    interpreter::library::{Library, LibraryName},
+    values::*,
+};
 
 fn apply<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     arguments: impl IntoIterator<Item = Value<R, E>>,
@@ -565,13 +569,6 @@ fn buildin_vector_set() -> Result<()> {
     Ok(())
 }
 
-fn display<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-    arguments: impl IntoIterator<Item = Value<R, E>>,
-) -> Result<Value<R, E>> {
-    print!("{}", arguments.into_iter().next().unwrap());
-    Ok(Value::Void)
-}
-
 fn newline<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     _: impl IntoIterator<Item = Value<R, E>>,
 ) -> Result<Value<R, E>> {
@@ -712,186 +709,158 @@ fn buildin_min() {
     }
 }
 
-pub fn base_library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>(
-) -> HashMap<String, Value<R, E>> {
-    macro_rules! function_mapping {
-        ($ident:tt, $fixed_parameter:expr, $variadic_parameter:expr, $function:expr) => {
-            (
-                $ident.to_owned(),
-                Value::Procedure(Procedure::new_buildin_impure(
-                    $ident,
-                    ParameterFormals($fixed_parameter, $variadic_parameter),
-                    $function,
-                )),
-            )
-        };
-    }
-
-    macro_rules! pure_function_mapping {
-        ($ident:tt, $fixed_parameter:expr, $variadic_parameter:expr, $function:expr) => {
-            (
-                $ident.to_owned(),
-                Value::Procedure(Procedure::new_buildin_pure(
-                    $ident,
-                    ParameterFormals($fixed_parameter, $variadic_parameter),
-                    $function,
-                )),
-            )
-        };
-    }
-
-    vec![
-        function_mapping!(
-            "apply",
-            vec!["proc".to_string()],
-            Some("args".to_string()),
-            apply
-        ),
-        pure_function_mapping!("car", vec!["pair".to_string()], None, car),
-        pure_function_mapping!("cdr", vec!["pair".to_string()], None, cdr),
-        pure_function_mapping!(
-            "eqv?",
-            vec!["obj1".to_string(), "obj2".to_string()],
-            None,
-            eqv
-        ),
-        pure_function_mapping!(
-            "eq?", // Ruschm is pass-by value now, so that eq? is equivalent to eqv?
-            vec!["obj1".to_string(), "obj2".to_string()],
-            None,
-            eqv
-        ),
-        pure_function_mapping!(
-            "cons",
-            vec!["car".to_string(), "cdr".to_string()],
-            None,
-            cons
-        ),
-        pure_function_mapping!(
-            "boolean?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::Boolean(_))
-        ),
-        pure_function_mapping!(
-            "char?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::Character(_))
-        ),
-        pure_function_mapping!(
-            "number?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::Number(_))
-        ),
-        pure_function_mapping!(
-            "string?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::String(_))
-        ),
-        pure_function_mapping!(
-            "symbol?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::Symbol(_))
-        ),
-        pure_function_mapping!(
-            "pair?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::Pair(_))
-        ),
-        pure_function_mapping!(
-            "procedure?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::Procedure(_))
-        ),
-        pure_function_mapping!(
-            "vector?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::Vector(_))
-        ),
-        pure_function_mapping!("not", vec!["obj".to_string()], None, not),
-        pure_function_mapping!(
-            "boolean=?",
-            vec![],
-            Some("booleans".to_string()),
-            boolean_equal
-        ),
-        pure_function_mapping!("+", vec![], Some("x".to_string()), add),
-        pure_function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
-        pure_function_mapping!("*", vec![], Some("x".to_string()), mul),
-        pure_function_mapping!("/", vec!["x1".to_string()], Some("x".to_string()), div),
-        pure_function_mapping!("=", vec![], Some("x".to_string()), equals),
-        pure_function_mapping!("<", vec![], Some("x".to_string()), less),
-        pure_function_mapping!("<=", vec![], Some("x".to_string()), less_equal),
-        pure_function_mapping!(">", vec![], Some("x".to_string()), greater),
-        pure_function_mapping!(">=", vec![], Some("x".to_string()), greater_equal),
-        pure_function_mapping!("min", vec!["x1".to_string()], Some("x".to_string()), min),
-        pure_function_mapping!("max", vec!["x1".to_string()], Some("x".to_string()), max),
-        pure_function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
-        pure_function_mapping!("floor", vec!["x".to_string()], None, floor),
-        pure_function_mapping!("ceiling", vec!["x".to_string()], None, ceiling),
-        pure_function_mapping!("exact", vec!["x".to_string()], None, exact),
-        pure_function_mapping!(
-            "floor-quotient",
-            vec!["n1".to_string(), "n2".to_string()],
-            None,
-            floor_quotient
-        ),
-        pure_function_mapping!(
-            "floor-remainder",
-            vec!["n1".to_string(), "n2".to_string()],
-            None,
-            floor_remainder
-        ),
-        pure_function_mapping!("display", vec!["value".to_string()], None, display),
-        pure_function_mapping!("newline", vec![], None, newline),
-        pure_function_mapping!("vector", vec![], Some("x".to_string()), vector),
-        pure_function_mapping!(
-            "make-vector",
-            vec!["k".to_string(), "obj".to_string()],
-            None,
-            make_vector
-        ),
-        pure_function_mapping!(
-            "vector-length",
-            vec!["vector".to_string()],
-            None,
-            vector_length
-        ),
-        pure_function_mapping!(
-            "vector-ref",
-            vec!["vector".to_string(), "k".to_string()],
-            None,
-            vector_ref
-        ),
-        pure_function_mapping!(
-            "vector-set!",
-            vec!["vector".to_string(), "k".to_string(), "obj".to_string()],
-            None,
-            vector_set
-        ),
-    ]
-    .into_iter()
-    .collect()
+pub fn library<'a, R: RealNumberInternalTrait, E: IEnvironment<R>>() -> Library<R, E> {
+    Library::new(
+        library_name!("ruschm", "base").into(),
+        vec![
+            function_mapping!(
+                "apply",
+                vec!["proc".to_string()],
+                Some("args".to_string()),
+                apply
+            ),
+            pure_function_mapping!("car", vec!["pair".to_string()], None, car),
+            pure_function_mapping!("cdr", vec!["pair".to_string()], None, cdr),
+            pure_function_mapping!(
+                "eqv?",
+                vec!["obj1".to_string(), "obj2".to_string()],
+                None,
+                eqv
+            ),
+            pure_function_mapping!(
+                "eq?", // Ruschm is pass-by value now, so that eq? is equivalent to eqv?
+                vec!["obj1".to_string(), "obj2".to_string()],
+                None,
+                eqv
+            ),
+            pure_function_mapping!(
+                "cons",
+                vec!["car".to_string(), "cdr".to_string()],
+                None,
+                cons
+            ),
+            pure_function_mapping!(
+                "boolean?",
+                vec!["obj".to_string()],
+                None,
+                value_test!(Value::Boolean(_))
+            ),
+            pure_function_mapping!(
+                "char?",
+                vec!["obj".to_string()],
+                None,
+                value_test!(Value::Character(_))
+            ),
+            pure_function_mapping!(
+                "number?",
+                vec!["obj".to_string()],
+                None,
+                value_test!(Value::Number(_))
+            ),
+            pure_function_mapping!(
+                "string?",
+                vec!["obj".to_string()],
+                None,
+                value_test!(Value::String(_))
+            ),
+            pure_function_mapping!(
+                "symbol?",
+                vec!["obj".to_string()],
+                None,
+                value_test!(Value::Symbol(_))
+            ),
+            pure_function_mapping!(
+                "pair?",
+                vec!["obj".to_string()],
+                None,
+                value_test!(Value::Pair(_))
+            ),
+            pure_function_mapping!(
+                "procedure?",
+                vec!["obj".to_string()],
+                None,
+                value_test!(Value::Procedure(_))
+            ),
+            pure_function_mapping!(
+                "vector?",
+                vec!["obj".to_string()],
+                None,
+                value_test!(Value::Vector(_))
+            ),
+            pure_function_mapping!("not", vec!["obj".to_string()], None, not),
+            pure_function_mapping!(
+                "boolean=?",
+                vec![],
+                Some("booleans".to_string()),
+                boolean_equal
+            ),
+            pure_function_mapping!("+", vec![], Some("x".to_string()), add),
+            pure_function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
+            pure_function_mapping!("*", vec![], Some("x".to_string()), mul),
+            pure_function_mapping!("/", vec!["x1".to_string()], Some("x".to_string()), div),
+            pure_function_mapping!("=", vec![], Some("x".to_string()), equals),
+            pure_function_mapping!("<", vec![], Some("x".to_string()), less),
+            pure_function_mapping!("<=", vec![], Some("x".to_string()), less_equal),
+            pure_function_mapping!(">", vec![], Some("x".to_string()), greater),
+            pure_function_mapping!(">=", vec![], Some("x".to_string()), greater_equal),
+            pure_function_mapping!("min", vec!["x1".to_string()], Some("x".to_string()), min),
+            pure_function_mapping!("max", vec!["x1".to_string()], Some("x".to_string()), max),
+            pure_function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
+            pure_function_mapping!("floor", vec!["x".to_string()], None, floor),
+            pure_function_mapping!("ceiling", vec!["x".to_string()], None, ceiling),
+            pure_function_mapping!("exact", vec!["x".to_string()], None, exact),
+            pure_function_mapping!(
+                "floor-quotient",
+                vec!["n1".to_string(), "n2".to_string()],
+                None,
+                floor_quotient
+            ),
+            pure_function_mapping!(
+                "floor-remainder",
+                vec!["n1".to_string(), "n2".to_string()],
+                None,
+                floor_remainder
+            ),
+            //pure_function_mapping!("display", vec!["value".to_string()], None, display),
+            pure_function_mapping!("newline", vec![], None, newline),
+            pure_function_mapping!("vector", vec![], Some("x".to_string()), vector),
+            pure_function_mapping!(
+                "make-vector",
+                vec!["k".to_string(), "obj".to_string()],
+                None,
+                make_vector
+            ),
+            pure_function_mapping!(
+                "vector-length",
+                vec!["vector".to_string()],
+                None,
+                vector_length
+            ),
+            pure_function_mapping!(
+                "vector-ref",
+                vec!["vector".to_string(), "k".to_string()],
+                None,
+                vector_ref
+            ),
+            pure_function_mapping!(
+                "vector-set!",
+                vec!["vector".to_string(), "k".to_string(), "obj".to_string()],
+                None,
+                vector_set
+            ),
+        ]
+        .into_iter(),
+    )
 }
 
 #[test]
 fn buildin_parameters_length() -> Result<()> {
-    let buildin_functions = base_library::<f32, StandardEnv<_>>();
+    let base_library = library::<f32, StandardEnv<_>>();
     assert!(matches!(
-        &buildin_functions["sqrt"],
+        &base_library.iter_definitions().find(|(name, _) |name.as_str() == "sqrt").unwrap().1,
         Value::Procedure(Procedure::Buildin(sqrt)) if sqrt.parameters.0.len() == 1));
     assert!(matches!(
-        &buildin_functions["display"],
-        Value::Procedure(Procedure::Buildin(display)) if display.parameters.0.len() == 1));
-    assert!(matches!(
-        &buildin_functions["newline"],
+        &base_library.iter_definitions().find(|(name, _) |name.as_str() == "newline").unwrap().1,
         Value::Procedure(Procedure::Buildin(newline)) if newline.parameters.0.len() == 0));
     Ok(())
 }

@@ -1,3 +1,4 @@
+(import (scheme base) (scheme write))
 (define (fib x)
     (if (< x 2)
         1

@@ -1,3 +1,4 @@
+(import (scheme base) (scheme write))
 (define make-seq-gen (lambda ()
             (define current 0)
             (lambda () (set! current (+ current 1)) current )))
