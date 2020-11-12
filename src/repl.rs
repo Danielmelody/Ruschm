@@ -1,4 +1,4 @@
-use crate::interpreter;
+use crate::interpreter::Interpreter;
 use crate::{environment::*, values::Value};
 use std::io;
 use std::io::Write;
@@ -23,7 +23,7 @@ fn check_bracket_closed(chars: impl Iterator<Item = char>) -> bool {
 
 pub fn run() {
     // currently rust is lack of higher kind type (HKT), so we need write f32 twice
-    let it = interpreter::Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
     let mut rl = Editor::<()>::new();
     io::stdout().flush().unwrap();
     let mut source = String::new();
@@ -31,6 +31,13 @@ pub fn run() {
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
     println!("Ruschm Version {}", VERSION);
+    // import all standard libraries for REPL
+    match it.import_standards() {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("{}", e);
+        }
+    }
     loop {
         let readline = match source.is_empty() {
             true => rl.readline("> "),

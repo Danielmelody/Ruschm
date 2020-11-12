@@ -1,0 +1,12 @@
+(define-library (example foo)
+    (export (rename hello display))
+    (import (scheme base) (scheme write))
+    (begin
+        (define (hello who)
+            (display "Hello, ")
+            (display who)
+            (display "!")
+            (newline)
+        )
+    )
+)

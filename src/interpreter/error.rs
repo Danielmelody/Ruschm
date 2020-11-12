@@ -4,6 +4,8 @@ use crate::{
     parser::error::SyntaxError, parser::Expression, parser::ParameterFormals, values::Type,
 };
 
+use super::library::LibraryName;
+
 #[derive(Error, Debug, PartialEq, Clone)]
 pub enum LogicError {
     #[error("unbound symbol {0}")]
@@ -35,4 +37,6 @@ pub enum LogicError {
     MetaCircularSyntax(#[from] SyntaxError),
     #[error("{0}")]
     Extension(String),
+    #[error("library {0} not found")]
+    LibraryNotFound(LibraryName),
 }

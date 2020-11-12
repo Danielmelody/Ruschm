@@ -1,3 +1,4 @@
+(import (scheme base) (scheme write))
 (define (fib-internal acc x)
     (if (< x 2)
         (+ acc 1)
@@ -17,7 +18,7 @@
 )
 
 (define fib-seq
-    (lambda x
+    (lambda (x)
         (fib-seq-internal 0 x)))
 
 (fib-seq 26)

@@ -1,21 +1,16 @@
-use ruschm::{environment::StandardEnv, error, interpreter::Interpreter, repl};
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use ruschm::{
+    environment::StandardEnv, error, file::file_char_stream, interpreter::Interpreter, repl,
+};
+use std::io::Write;
+use std::path::Path;
 use std::{env, process::exit};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 fn main() -> Result<(), error::SchemeError> {
     Ok(match env::args().skip(1).next() {
         Some(file) => {
-            let f = BufReader::new(File::open(file.as_str()).expect("no such file or directory"));
-            let it = Interpreter::<f32, StandardEnv<f32>>::new();
-            let result = it.eval(f.lines().flat_map(|line| {
-                line.unwrap()
-                    .chars()
-                    .chain(std::iter::once('\n'))
-                    .collect::<Vec<_>>()
-                    .into_iter()
-            }));
+            let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
+            let result = it.eval(file_char_stream(Path::new(&file))?);
             match result {
                 Ok(_) => (),
                 Err(e) => {

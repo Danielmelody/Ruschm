@@ -1,3 +1,4 @@
+(import (scheme base) (scheme write))
 (define (sum-internal acc i x)
     (define i-plus-one (+ i 1))
     (if (< i x)

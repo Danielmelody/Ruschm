@@ -1,17 +1,21 @@
 #![allow(dead_code)]
 use error::SyntaxError;
 
+use crate::file::file_char_stream;
 use crate::values::{ArgVec, Type};
 use crate::{
-    environment::*, values::BuildinProcedure, values::Number, values::RealNumberInternalTrait,
-    values::ValueReference,
+    environment::*, library_name, values::BuildinProcedure, values::Number,
+    values::RealNumberInternalTrait, values::ValueReference,
 };
 use crate::{error::*, values::Value};
 use crate::{parser::*, values::Procedure};
-use std::iter::Iterator;
-use std::marker::PhantomData;
-use std::rc::Rc;
 
+use std::marker::PhantomData;
+use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashSet, iter::Iterator};
+
+use super::library::{buildin, Library, StandardLibrarySearcher};
+use super::library::{LibraryName, LibrarySearcher};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
 
@@ -23,20 +27,43 @@ enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
 
 pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub env: Rc<E>,
+    lib_searcher: Box<dyn LibrarySearcher>,
+    loaded_libs: HashMap<LibraryName, Option<Library<R, E>>>,
+    import_end: bool, // indicate program's import declaration part end
     _marker: PhantomData<R>,
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn new() -> Self {
-        let interpreter = Self {
+        let mut interpreter = Self {
             env: Rc::new(E::new()),
+            lib_searcher: Box::new(StandardLibrarySearcher::new()),
+            loaded_libs: HashMap::new(),
+            import_end: false,
             _marker: PhantomData,
         };
-
+        for library in buildin::librarys() {
+            interpreter.load_library(library);
+        }
         interpreter
-            .eval(include_str!("./scheme/base.scm").chars())
-            .unwrap();
-        interpreter
+    }
+    pub fn register_library_searcher(&mut self, searcher: Box<dyn LibrarySearcher>) {
+        self.lib_searcher = searcher;
+    }
+    pub fn import_standards(&mut self) -> Result<()> {
+        let standard_libraries = vec![
+            library_name!("scheme", "base"),
+            library_name!("scheme", "write"),
+            // TODO: other standard library
+        ];
+        for lib_name in standard_libraries {
+            let env = self.env.clone();
+            let library = self.get_or_load_library(&lib_name.clone().into())?;
+            for (name, value) in library.iter_definitions() {
+                env.clone().define(name.clone(), value.clone())
+            }
+        }
+        Ok(())
     }
 
     fn apply_scheme_procedure<'a>(
@@ -285,9 +312,104 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         })
     }
 
-    pub fn eval_ast(ast: &Statement, env: Rc<E>) -> Result<Option<Value<R, E>>> {
-        Ok(match ast {
-            Statement::ImportDeclaration(_) => None, // TODO
+    pub fn eval_import(&mut self, imports: &ImportDeclaration, env: Rc<E>) -> Result<()> {
+        let mut definitions = HashMap::new();
+        for import in &imports.0 {
+            definitions.extend(self.eval_import_set(import)?.into_iter());
+        }
+        for (name, value) in definitions {
+            env.define(name, value);
+        }
+        Ok(())
+    }
+    pub fn get_or_load_library(&mut self, name: &Located<LibraryName>) -> Result<&Library<R, E>> {
+        if self.loaded_libs.contains_key(name) {
+            match self.loaded_libs.get(name).unwrap() {
+                Some(lib) => return Ok(lib),
+                // library is loading
+                None => todo!("circular import is not supported"),
+            }
+        } else {
+            // mark library is loading
+            self.loaded_libs.insert(name.data.clone(), None);
+            let library = self.search_library(name.clone())?;
+            Ok(self.load_library(library))
+        }
+    }
+    pub fn load_library(&mut self, library: Library<R, E>) -> &Library<R, E> {
+        let name = library.name().clone();
+        self.loaded_libs
+            .insert(name.clone().extract_data(), Some(library));
+        self.loaded_libs.get(&name).unwrap().as_ref().unwrap()
+    }
+    pub fn search_library(&mut self, name: Located<LibraryName>) -> Result<Library<R, E>> {
+        match self.lib_searcher.search_lib(name.clone()) {
+            Some(path) => {
+                let lexer = Lexer::from_char_stream(file_char_stream(&path)?);
+                let parser = Parser::from_lexer(lexer);
+                let statements = parser.into_iter().collect::<Result<Vec<_>>>()?;
+                let library = self.eval_library(statements.iter())?;
+                if library.name().data == name.data {
+                    return Ok(library);
+                }
+            }
+            None => {}
+        }
+        located_error!(LogicError::LibraryNotFound(name.data), name.location)
+    }
+    pub fn eval_import_set(&mut self, import: &ImportSet) -> Result<Vec<(String, Value<R, E>)>> {
+        match &import.data {
+            ImportSetBody::Direct(lib_name) => {
+                let library = self.get_or_load_library(lib_name)?;
+                Ok(library
+                    .iter_definitions()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect())
+            }
+            ImportSetBody::Only(import_set, identifiers) => {
+                let id_set = identifiers.into_iter().collect::<HashSet<_>>();
+                Ok(self
+                    .eval_import_set(import_set.as_ref())?
+                    .into_iter()
+                    .filter(|(name, _)| id_set.contains(name))
+                    .collect())
+            }
+            ImportSetBody::Except(import_set, identifiers) => {
+                let id_set = identifiers.into_iter().collect::<HashSet<_>>();
+                Ok(self
+                    .eval_import_set(import_set.as_ref())?
+                    .into_iter()
+                    .filter(|(name, _)| !id_set.contains(name))
+                    .collect())
+            }
+            ImportSetBody::Prefix(import_set, prefix) => Ok(self
+                .eval_import_set(import_set.as_ref())?
+                .into_iter()
+                .map(|(name, value)| (format!("{}{}", prefix, name), value))
+                .collect()),
+            ImportSetBody::Rename(import_set, renames) => {
+                let id_map = renames
+                    .into_iter()
+                    .map(|(from, to)| (from, to))
+                    .collect::<HashMap<_, _>>();
+                Ok(self
+                    .eval_import_set(import_set.as_ref())?
+                    .into_iter()
+                    .map(|(name, value)| match id_map.get(&name) {
+                        Some(to) => ((*to).clone(), value),
+                        None => (name, value),
+                    })
+                    .collect())
+            }
+        }
+    }
+
+    pub fn eval_expression_or_definition(
+        &mut self,
+        statement: &Statement,
+        env: Rc<E>,
+    ) -> Result<Option<Value<R, E>>> {
+        Ok(match statement {
             Statement::Expression(expr) => Some(Self::eval_expression(&expr, &env)?),
             Statement::Definition(Definition {
                 data: DefinitionBody(name, expr),
@@ -298,22 +420,101 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 None
             }
             Statement::SyntaxDefinition(_) => todo!("defining new syntax is not supported"),
+            _ => error!(SyntaxError::ExpectSomething(
+                "expression/definition".to_string()
+            ))?,
         })
     }
 
-    pub fn eval_root_ast(&self, ast: &Statement) -> Result<Option<Value<R, E>>> {
-        Self::eval_ast(ast, self.env.clone())
+    pub fn eval_ast(&mut self, ast: &Statement, env: Rc<E>) -> Result<Option<Value<R, E>>> {
+        if !self.import_end {
+            Ok(match ast {
+                Statement::ImportDeclaration(imports) => {
+                    self.eval_import(imports, env)?;
+                    None
+                }
+                Statement::LibraryDefinition(library_definition) => {
+                    return located_error!(
+                        SyntaxError::ExpectSomething(
+                            "import declaration/expression/definition".to_string()
+                        ),
+                        library_definition.location.clone()
+                    );
+                }
+                other => {
+                    self.import_end = true;
+                    self.eval_expression_or_definition(other, env)?
+                }
+            })
+        } else {
+            self.eval_expression_or_definition(ast, env)
+        }
     }
 
+    pub fn eval_root_ast(&mut self, ast: &Statement) -> Result<Option<Value<R, E>>> {
+        self.eval_ast(ast, self.env.clone())
+    }
+
+    pub fn eval_library_definition<'a>(
+        &mut self,
+        library_definition: &LibraryDefinition,
+    ) -> Result<Library<R, E>> {
+        let name = library_definition.0.clone();
+        let mut definitions = HashMap::new();
+        let mut final_exports = Vec::new();
+        let lib_env = Rc::new(E::new());
+        for declaration in &library_definition.1 {
+            match &declaration.data {
+                LibraryDeclaration::ImportDeclaration(imports) => {
+                    self.eval_import(imports, lib_env.clone())?;
+                }
+                LibraryDeclaration::Export(exports) => final_exports.extend(exports.iter()),
+                LibraryDeclaration::Begin(statements) => {
+                    for statement in statements.iter() {
+                        self.eval_expression_or_definition(statement, lib_env.clone())?;
+                    }
+                }
+            }
+        }
+        for export in final_exports {
+            let (from, to) = match &export.data {
+                ExportSpec::Direct(identifier) => (identifier, identifier),
+                ExportSpec::Rename(from, to) => (from, to),
+            };
+            match lib_env.get(from) {
+                Some(value) => {
+                    definitions.insert(to.clone(), value.clone());
+                }
+                None => located_error!(LogicError::UnboundedSymbol(from.clone()), export.location)?,
+            }
+        }
+        Ok(Library::new(name, definitions))
+    }
+    pub fn eval_library<'a>(
+        &mut self,
+        mut asts: impl Iterator<Item = &'a Statement>,
+    ) -> Result<Library<R, E>> {
+        match asts.next() {
+            Some(Statement::LibraryDefinition(library_definition)) => {
+                if asts.next().is_none() {
+                    return self.eval_library_definition(&library_definition.data);
+                }
+            }
+            _ => {}
+        }
+        error!(SyntaxError::ExpectSomething(
+            "exact one library definition".to_string()
+        ))
+    }
     pub fn eval_program<'a>(
-        &self,
+        &mut self,
         asts: impl IntoIterator<Item = &'a Statement>,
     ) -> Result<Option<Value<R, E>>> {
         asts.into_iter()
             .try_fold(None, |_, ast| self.eval_root_ast(&ast))
     }
 
-    pub fn eval(&self, char_stream: impl Iterator<Item = char>) -> Result<Option<Value<R, E>>> {
+    pub fn eval(&mut self, char_stream: impl Iterator<Item = char>) -> Result<Option<Value<R, E>>> {
         {
             let lexer = Lexer::from_char_stream(char_stream);
             let mut parser = Parser::from_lexer(lexer);
@@ -324,7 +525,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 
 #[test]
 fn number() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     assert_eq!(
         interpreter
             .eval_root_expression(ExpressionBody::Primitive(Primitive::Integer(-1)).into())?,
@@ -346,7 +548,8 @@ fn number() -> Result<()> {
 
 #[test]
 fn arithmetic() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
             Box::new(Expression::from(ExpressionBody::Identifier(
@@ -488,19 +691,22 @@ fn arithmetic() -> Result<()> {
 }
 
 #[test]
-fn undefined() {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+fn undefined() -> Result<()> {
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::Identifier(
             "foo".to_string()
         ))),
         Err(ErrorData::Logic(LogicError::UnboundedSymbol("foo".to_string())).no_locate())
     );
+    Ok(())
 }
 
 #[test]
 fn variable_definition() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "a".to_string(),
@@ -523,7 +729,8 @@ fn variable_definition() -> Result<()> {
 
 #[test]
 fn variable_assignment() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "a".to_string(),
@@ -546,7 +753,8 @@ fn variable_assignment() -> Result<()> {
 
 #[test]
 fn buildin_procedural() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "get-add".to_string(),
@@ -577,7 +785,8 @@ fn buildin_procedural() -> Result<()> {
 
 #[test]
 fn procedure_definition() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "add".to_string(),
@@ -613,7 +822,8 @@ fn procedure_definition() -> Result<()> {
 
 #[test]
 fn procedure_debug() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![Statement::Expression(simple_procedure(
         ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
         Expression::from(ExpressionBody::ProcedureCall(
@@ -633,7 +843,8 @@ fn procedure_debug() -> Result<()> {
 
 #[test]
 fn lambda_call() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![Statement::Expression(Expression::from(
         ExpressionBody::ProcedureCall(
             Box::new(simple_procedure(
@@ -668,7 +879,8 @@ fn lambda_call() -> Result<()> {
 
 #[test]
 fn closure() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "counter-creator".to_string(),
@@ -733,7 +945,8 @@ fn closure() -> Result<()> {
 }
 #[test]
 fn condition() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     assert_eq!(
         interpreter.eval_program(
             vec![Statement::Expression(Expression::from(
@@ -765,7 +978,8 @@ fn condition() -> Result<()> {
 
 #[test]
 fn local_environment() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "adda".to_string(),
@@ -802,7 +1016,8 @@ fn local_environment() -> Result<()> {
 
 #[test]
 fn procedure_as_data() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "add".to_string(),
@@ -861,7 +1076,8 @@ fn eval_tail_expression() -> Result<()> {
         ExpressionBody::Primitive(Primitive::Integer(2)),
         ExpressionBody::Primitive(Primitive::Integer(5)),
     ]);
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     {
         let expression = ExpressionBody::Primitive(Primitive::Integer(3)).into();
         assert_eq!(
@@ -946,7 +1162,8 @@ fn eval_tail_expression() -> Result<()> {
 
 #[test]
 fn datum_literal() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.import_standards()?;
     assert_eq!(
         Interpreter::eval_expression(
             &ExpressionBody::Quote(Box::new(
@@ -1002,5 +1219,224 @@ fn datum_literal() -> Result<()> {
             "a".to_string()
         )]))
     );
+    Ok(())
+}
+
+#[test]
+fn search_library() -> Result<()> {
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let library = interpreter.search_library(library_name!("scheme", "base").into())?;
+    assert!(library
+        .iter_definitions()
+        .find(|(name, _)| name.as_str() == "+")
+        .is_some());
+    // not exist
+    assert!(interpreter
+        .search_library(library_name!("lib", "not", "exist").into(),)
+        .is_err());
+    Ok(())
+}
+
+#[test]
+fn import_set() -> Result<()> {
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.load_library(Library::new(
+        library_name!("foo", "bar").into(),
+        vec![
+            ("a".to_string(), Value::String("father".to_string())),
+            ("b".to_string(), Value::String("bob".to_string())),
+        ]
+        .into_iter(),
+    ));
+    let direct = ImportSetBody::Direct(library_name!("foo", "bar").into());
+    {
+        let definitions = interpreter.eval_import_set(&direct.clone().into())?;
+        assert!(definitions.len() == 2);
+        assert!(definitions.contains(&("a".to_string(), Value::String("father".to_string()))));
+        assert!(definitions.contains(&("b".to_string(), Value::String("bob".to_string()))));
+    }
+    {
+        let only = ImportSetBody::Only(Box::new(direct.clone().into()), vec!["b".to_string()]);
+        let definitions = interpreter.eval_import_set(&only.into())?;
+        assert!(definitions.len() == 1);
+        assert!(definitions.contains(&("b".to_string(), Value::String("bob".to_string()))));
+    }
+    let prefix = ImportSetBody::Prefix(Box::new(direct.clone().into()), "god-".to_string());
+    {
+        let definitions = interpreter.eval_import_set(&prefix.clone().into())?;
+        assert!(definitions.len() == 2);
+        assert!(definitions.contains(&("god-a".to_string(), Value::String("father".to_string()))));
+        assert!(definitions.contains(&("god-b".to_string(), Value::String("bob".to_string()))));
+    }
+    {
+        let except =
+            ImportSetBody::Except(Box::new(prefix.clone().into()), vec!["god-b".to_string()]);
+        let definitions = interpreter.eval_import_set(&except.into())?;
+        assert!(definitions.len() == 1);
+        assert!(definitions.contains(&("god-a".to_string(), Value::String("father".to_string()))));
+    }
+    {
+        let rename = ImportSetBody::Rename(
+            Box::new(prefix.clone().into()),
+            vec![("god-b".to_string(), "human-a".to_string())],
+        );
+        let definitions = interpreter.eval_import_set(&rename.into())?;
+        assert!(definitions.len() == 2);
+        assert!(definitions.contains(&("god-a".to_string(), Value::String("father".to_string()))));
+        assert!(definitions.contains(&("human-a".to_string(), Value::String("bob".to_string()))));
+    }
+    Ok(())
+}
+
+#[test]
+fn import() -> Result<()> {
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.load_library(Library::new(
+        library_name!("foo", "bar").into(),
+        vec![
+            ("a".to_string(), Value::String("father".to_string())),
+            ("b".to_string(), Value::String("bob".to_string())),
+        ]
+        .into_iter(),
+    ));
+    let import_declaration = ImportDeclaration(vec![
+        ImportSetBody::Only(
+            Box::new(ImportSetBody::Direct(library_name!("foo", "bar").into()).into()),
+            vec!["b".to_string()],
+        )
+        .into(),
+        ImportSetBody::Rename(
+            Box::new(ImportSetBody::Direct(library_name!("foo", "bar").into()).into()),
+            vec![("a".to_string(), "c".to_string())],
+        )
+        .into(),
+    ]);
+    use std::ops::Deref;
+    interpreter.eval_import(&import_declaration, interpreter.env.clone())?;
+    {
+        let value = interpreter.env.get("b").unwrap();
+        assert_eq!(value.deref(), &Value::String("bob".to_string()));
+    }
+    {
+        let value = interpreter.env.get("c").unwrap();
+        assert_eq!(value.deref(), &Value::String("father".to_string()));
+    }
+    Ok(())
+}
+
+#[test]
+fn library_definition() -> Result<()> {
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    interpreter.load_library(Library::new(
+        library_name!("foo", "bar").into(),
+        vec![
+            ("a".to_string(), Value::String("father".to_string())),
+            ("b".to_string(), Value::String("bob".to_string())),
+        ]
+        .into_iter(),
+    ));
+    {
+        // empty library
+        let library_definition = LibraryDefinition(library_name!("foo", "foo-bar").into(), vec![]);
+        let library = interpreter.eval_library_definition(&library_definition)?;
+        assert_eq!(
+            library,
+            Library::new(library_name!("foo", "foo-bar").into(), vec![])
+        );
+    }
+    {
+        // export direct
+        let library_definition = LibraryDefinition(
+            library_name!("foo", "foo-bar").into(),
+            vec![
+                LibraryDeclaration::ImportDeclaration(
+                    ImportDeclaration(vec![ImportSetBody::Direct(
+                        library_name!("foo", "bar").into(),
+                    )
+                    .into()])
+                    .no_locate(),
+                )
+                .into(),
+                LibraryDeclaration::Export(vec![ExportSpec::Direct("a".to_string()).into()]).into(),
+            ],
+        );
+        let library = interpreter.eval_library_definition(&library_definition)?;
+        assert_eq!(
+            library,
+            Library::new(
+                library_name!("foo", "foo-bar").into(),
+                vec![("a".to_string(), Value::String("father".to_string()))]
+            )
+        );
+    }
+    {
+        // export direct and rename
+        let library_definition = LibraryDefinition(
+            library_name!("foo", "foo-bar").into(),
+            vec![
+                LibraryDeclaration::Export(vec![ExportSpec::Rename(
+                    "b".to_string(),
+                    "c".to_string(),
+                )
+                .into()])
+                .into(),
+                LibraryDeclaration::ImportDeclaration(
+                    ImportDeclaration(vec![ImportSetBody::Direct(
+                        library_name!("foo", "bar").into(),
+                    )
+                    .into()])
+                    .no_locate(),
+                )
+                .into(),
+                LibraryDeclaration::Export(vec![ExportSpec::Direct("a".to_string()).into()]).into(),
+            ],
+        );
+        let library = interpreter.eval_library_definition(&library_definition)?;
+        assert_eq!(
+            library,
+            Library::new(
+                library_name!("foo", "foo-bar").into(),
+                vec![
+                    ("a".to_string(), Value::String("father".to_string())),
+                    ("c".to_string(), Value::String("bob".to_string()))
+                ]
+            )
+        );
+    }
+    {
+        // export local define
+        let library_definition = LibraryDefinition(
+            library_name!("foo", "foo-bar").into(),
+            vec![
+                // define need (scheme base)
+                LibraryDeclaration::ImportDeclaration(
+                    ImportDeclaration(vec![ImportSetBody::Direct(
+                        library_name!("scheme", "base").into(),
+                    )
+                    .into()])
+                    .no_locate(),
+                )
+                .into(),
+                LibraryDeclaration::Begin(vec![Statement::Definition(
+                    DefinitionBody(
+                        "a".to_string(),
+                        ExpressionBody::Primitive(Primitive::Integer(5)).into(),
+                    )
+                    .into(),
+                )])
+                .into(),
+                LibraryDeclaration::Export(vec![ExportSpec::Direct("a".to_string()).into()]).into(),
+            ],
+        );
+        let library = interpreter.eval_library_definition(&library_definition)?;
+        assert_eq!(
+            library,
+            Library::new(
+                library_name!("foo", "foo-bar").into(),
+                vec![("a".to_string(), Value::Number(Number::Integer(5))),]
+            )
+        );
+    }
+
     Ok(())
 }

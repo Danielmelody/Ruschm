@@ -1,18 +1,12 @@
 use thiserror::Error;
 
 use std::fmt;
-use std::{error::Error, fmt::Debug};
+use std::{error::Error, fmt::Debug, ops::Deref, ops::DerefMut};
 
 use fmt::Display;
 
 use crate::{interpreter::error::LogicError, parser::error::SyntaxError};
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum ErrorType {
-    Lexical,
-    Syntax,
-    Logic,
-}
 #[derive(Debug, Clone, Copy)]
 pub struct Located<T: PartialEq> {
     pub data: T,
@@ -40,6 +34,17 @@ pub trait ToLocated {
         }
     }
 }
+impl<T: PartialEq> Located<T> {
+    pub fn map<U: PartialEq>(self, f: impl Fn(T) -> U) -> Located<U> {
+        Located::<U> {
+            data: f(self.data),
+            location: self.location,
+        }
+    }
+    pub fn extract_data(self) -> T {
+        self.data
+    }
+}
 
 impl<T: PartialEq> From<T> for Located<T> {
     fn from(data: T) -> Self {
@@ -62,15 +67,34 @@ impl<T: PartialEq + Display> Display for Located<T> {
     }
 }
 
+impl<T: PartialEq> Deref for Located<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+impl<T: PartialEq> DerefMut for Located<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
 #[derive(PartialEq, Error, Clone)]
 pub enum ErrorData {
     #[error("syntax error: {0}")]
     Syntax(#[from] SyntaxError),
     #[error(transparent)]
     Logic(#[from] LogicError),
+    #[error("io error: {0}")]
+    IO(String), // std::io::Error does not implement PartialEq and Clone, so use display message directly
 }
 
 pub type SchemeError = Located<ErrorData>;
+impl From<std::io::Error> for SchemeError {
+    fn from(io_error: std::io::Error) -> Self {
+        ErrorData::IO(format!("{}", io_error)).no_locate()
+    }
+}
 
 impl ToLocated for ErrorData {}
 

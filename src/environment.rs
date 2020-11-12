@@ -1,4 +1,3 @@
-use crate::interpreter::scheme;
 #[cfg(test)]
 use crate::interpreter::Interpreter;
 use crate::values::RealNumberInternalTrait;
@@ -45,7 +44,7 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
     fn new() -> Self {
         Self {
             parent: None,
-            definitions: RefCell::new(scheme::base::base_library::<R, StandardEnv<R>>()),
+            definitions: RefCell::new(HashMap::new()),
         }
     }
     fn new_child(parent: Rc<StandardEnv<R>>) -> Self {
@@ -109,7 +108,8 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
 
 #[test]
 fn iter_envs() -> Result<(), Box<dyn std::error::Error>> {
-    let it = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
+    it.import_standards()?;
     {
         it.env.define("a".to_string(), Value::Void);
     }
