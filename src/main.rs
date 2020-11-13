@@ -1,16 +1,14 @@
-use ruschm::{
-    environment::StandardEnv, error, file::file_char_stream, interpreter::Interpreter, repl,
-};
-use std::io::Write;
-use std::path::Path;
+use ruschm::{environment::StandardEnv, error, interpreter::Interpreter, repl};
+
 use std::{env, process::exit};
+use std::{io::Write, path::PathBuf};
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 fn main() -> Result<(), error::SchemeError> {
     Ok(match env::args().skip(1).next() {
         Some(file) => {
             let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
-            let result = it.eval(file_char_stream(Path::new(&file))?);
+            let result = it.eval_file(PathBuf::from(file.clone()));
             match result {
                 Ok(_) => (),
                 Err(e) => {
