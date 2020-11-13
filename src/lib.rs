@@ -1,4 +1,6 @@
 #[macro_use]
+extern crate lazy_static;
+#[macro_use]
 pub mod error;
 #[macro_use]
 pub mod interpreter;

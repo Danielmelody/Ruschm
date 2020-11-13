@@ -4,16 +4,17 @@ macro_rules! library_name {
         LibraryName(vec![$($e.into()),+])
     };
 }
-pub mod buildin;
+pub mod include;
+pub mod native;
 use itertools::Itertools;
 
-use crate::{environment::*, error::*, values::*};
+use crate::{environment::*, error::*, file::file_char_stream, values::*};
 use std::{collections::HashMap, fmt::Display, iter::FromIterator, path::PathBuf};
 
 // r7rs:
 // ⟨library name⟩ is a list whose members are identifiers and
 // exact non-negative integers.
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LibraryNameElement {
     Identifier(String),
     Integer(u32),
@@ -42,7 +43,7 @@ impl From<u32> for LibraryNameElement {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LibraryName(pub Vec<LibraryNameElement>);
 
 impl ToLocated for LibraryName {}
@@ -106,7 +107,10 @@ impl LibraryName {
 }
 
 pub trait LibrarySearcher {
-    fn search_lib(&self, library_name: Located<LibraryName>) -> Option<PathBuf>;
+    fn search_lib(
+        &self,
+        library_name: Located<LibraryName>,
+    ) -> Option<Box<dyn Iterator<Item = char>>>;
 }
 
 pub struct StandardLibrarySearcher {}
@@ -117,37 +121,38 @@ impl StandardLibrarySearcher {
     }
 }
 
-impl LibrarySearcher for StandardLibrarySearcher {
-    fn search_lib(&self, library_name: Located<LibraryName>) -> Option<PathBuf> {
-        match std::env::current_dir() {
-            Ok(pwd) => Some(
-                pwd.join("lib")
-                    .join(library_name.extract_data().path())
-                    .with_extension("sld"),
-            ),
+impl StandardLibrarySearcher {
+    pub fn get_include_library(library_name: &LibraryName) -> Option<&'static str> {
+        match include::LIBRARY_STRS.binary_search_by(|(name, _)| name.cmp(library_name)) {
+            Ok(i) => Some(include::LIBRARY_STRS[i].1),
             Err(_) => None,
         }
     }
 }
 
-#[test]
-fn standard_library_searcher() {
-    let searcher = StandardLibrarySearcher::new();
-    match std::env::current_dir() {
-        Ok(pwd) => {
-            assert_eq!(
-                searcher.search_lib(library_name!("s", 0, "a").into()),
-                Some(
-                    pwd.join("lib")
-                        .join("s")
-                        .join("0")
-                        .join("a")
-                        .with_extension("sld")
-                )
-            );
-        }
-        Err(_) => {
-            assert_eq!(searcher.search_lib(library_name!("s", 0, "a").into()), None);
+impl LibrarySearcher for StandardLibrarySearcher {
+    fn search_lib(
+        &self,
+        library_name: Located<LibraryName>,
+    ) -> Option<Box<dyn Iterator<Item = char>>> {
+        match Self::get_include_library(&library_name) {
+            Some(library_str) => Some(Box::new(library_str.chars())),
+            None => match std::env::current_dir() {
+                Ok(pwd) => {
+                    let path = pwd
+                        .join("lib")
+                        .join(library_name.extract_data().path())
+                        .with_extension("sld");
+                    // file exist
+                    if path.exists() {
+                        // directly unwrap to panic for other io error
+                        Some(Box::new(file_char_stream(&path).unwrap()))
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
+            },
         }
     }
 }

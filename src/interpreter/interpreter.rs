@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 use error::SyntaxError;
 
-use crate::file::file_char_stream;
 use crate::values::{ArgVec, Type};
 use crate::{
     environment::*, library_name, values::BuildinProcedure, values::Number,
@@ -14,7 +13,7 @@ use std::marker::PhantomData;
 use std::{collections::HashMap, rc::Rc};
 use std::{collections::HashSet, iter::Iterator};
 
-use super::library::{buildin, Library, StandardLibrarySearcher};
+use super::library::{native, Library, StandardLibrarySearcher};
 use super::library::{LibraryName, LibrarySearcher};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
@@ -42,7 +41,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             import_end: false,
             _marker: PhantomData,
         };
-        for library in buildin::librarys() {
+        for library in native::librarys() {
             interpreter.load_library(library);
         }
         interpreter
@@ -344,11 +343,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     }
     pub fn search_library(&mut self, name: Located<LibraryName>) -> Result<Library<R, E>> {
         match self.lib_searcher.search_lib(name.clone()) {
-            Some(path) => {
-                let lexer = Lexer::from_char_stream(file_char_stream(&path)?);
-                let parser = Parser::from_lexer(lexer);
-                let statements = parser.into_iter().collect::<Result<Vec<_>>>()?;
-                let library = self.eval_library(statements.iter())?;
+            Some(char_stream) => {
+                let library = self.eval_library_from_char_stream(char_stream)?;
                 if library.name().data == name.data {
                     return Ok(library);
                 }
@@ -489,6 +485,15 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             }
         }
         Ok(Library::new(name, definitions))
+    }
+    pub fn eval_library_from_char_stream(
+        &mut self,
+        char_stream: impl Iterator<Item = char>,
+    ) -> Result<Library<R, E>> {
+        let lexer = Lexer::from_char_stream(char_stream);
+        let parser = Parser::from_lexer(lexer);
+        let statements = parser.into_iter().collect::<Result<Vec<_>>>()?;
+        self.eval_library(statements.iter())
     }
     pub fn eval_library<'a>(
         &mut self,
