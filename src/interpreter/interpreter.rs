@@ -1,23 +1,81 @@
 #![allow(dead_code)]
+
 use error::SyntaxError;
 
-use crate::file::file_char_stream;
-use crate::values::{ArgVec, Type};
 use crate::{
     environment::*, library_name, values::BuildinProcedure, values::Number,
     values::RealNumberInternalTrait, values::ValueReference,
 };
 use crate::{error::*, values::Value};
+use crate::{
+    file::file_char_stream,
+    values::{ArgVec, Type},
+};
 use crate::{parser::*, values::Procedure};
 
-use std::marker::PhantomData;
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, ops::Deref, path::Path, rc::Rc};
 use std::{collections::HashSet, iter::Iterator};
+use std::{marker::PhantomData, path::PathBuf};
 
-use super::library::{buildin, Library, StandardLibrarySearcher};
-use super::library::{LibraryName, LibrarySearcher};
+use super::library::LibraryName;
+use super::library::{native, Library};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
+
+pub enum LibraryFactory<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    Native(LibraryName, fn() -> Vec<(String, Value<R, E>)>),
+    AST(Located<LibraryDefinition>),
+}
+#[test]
+fn library_factory() -> Result<()> {
+    let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
+    it.register_library_factory(LibraryFactory::Native(library_name!("foo"), || {
+        vec![("a".to_string(), Value::Void)]
+    }));
+    assert_eq!(
+        it.get_library(library_name!("foo").into()),
+        Ok(Library::new(
+            library_name!("foo").into(),
+            vec![("a".to_string(), Value::Void)]
+        ))
+    );
+    it.register_library_factory(LibraryFactory::from_char_stream(
+        &library_name!("foo"),
+        "(define-library (foo) (export a) (begin (define a 1)))".chars(),
+    )?);
+    assert_eq!(
+        it.get_library(library_name!("foo").into()),
+        Ok(Library::new(
+            library_name!("foo").locate(Some([1, 18])),
+            vec![("a".to_string(), Value::Number(Number::Integer(1)))]
+        ))
+    );
+    Ok(())
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryFactory<R, E> {
+    pub fn get_library_name(&self) -> &LibraryName {
+        match self {
+            LibraryFactory::Native(name, _) => name,
+            LibraryFactory::AST(library_definition) => &library_definition.0,
+        }
+    }
+    pub fn from_char_stream(
+        expect_library_name: &LibraryName,
+        char_stream: impl Iterator<Item = char>,
+    ) -> Result<Self> {
+        let lexer = Lexer::from_char_stream(char_stream);
+        let parser = Parser::from_lexer(lexer);
+        for statement in parser {
+            if let Statement::LibraryDefinition(library_definition) = statement? {
+                if library_definition.0.deref() == expect_library_name {
+                    return Ok(Self::AST(library_definition));
+                }
+            }
+        }
+        error!(LogicError::LibraryNotFound(expect_library_name.clone()))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
@@ -27,9 +85,9 @@ enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
 
 pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub env: Rc<E>,
-    lib_searcher: Box<dyn LibrarySearcher>,
-    loaded_libs: HashMap<LibraryName, Option<Library<R, E>>>,
+    lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R, E>>>,
     import_end: bool, // indicate program's import declaration part end
+    pub program_directory: Option<PathBuf>,
     _marker: PhantomData<R>,
 }
 
@@ -37,18 +95,41 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn new() -> Self {
         let mut interpreter = Self {
             env: Rc::new(E::new()),
-            lib_searcher: Box::new(StandardLibrarySearcher::new()),
-            loaded_libs: HashMap::new(),
+            lib_factories: HashMap::new(),
             import_end: false,
+            program_directory: None,
             _marker: PhantomData,
         };
-        for library in buildin::librarys() {
-            interpreter.load_library(library);
-        }
+        interpreter.register_library_factory(LibraryFactory::Native(
+            library_name!("ruschm", "base"),
+            native::base::library_map,
+        ));
+        interpreter.register_library_factory(LibraryFactory::Native(
+            library_name!("ruschm", "write"),
+            native::write::library_map,
+        ));
+        interpreter.register_library_factory(
+            LibraryFactory::from_char_stream(
+                &library_name!("scheme", "base"),
+                include_str!("library/include/scheme/base.sld").chars(),
+            )
+            .unwrap(),
+        );
+        interpreter.register_library_factory(
+            LibraryFactory::from_char_stream(
+                &library_name!("scheme", "write"),
+                include_str!("library/include/scheme/write.sld").chars(),
+            )
+            .unwrap(),
+        );
+
         interpreter
     }
-    pub fn register_library_searcher(&mut self, searcher: Box<dyn LibrarySearcher>) {
-        self.lib_searcher = searcher;
+    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R, E>) {
+        self.lib_factories.insert(
+            library_factory.get_library_name().clone(),
+            Rc::new(library_factory),
+        );
     }
     pub fn import_standards(&mut self) -> Result<()> {
         let standard_libraries = vec![
@@ -58,7 +139,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         ];
         for lib_name in standard_libraries {
             let env = self.env.clone();
-            let library = self.get_or_load_library(&lib_name.clone().into())?;
+            let library = self.get_library(lib_name.clone().into())?;
             for (name, value) in library.iter_definitions() {
                 env.clone().define(name.clone(), value.clone())
             }
@@ -322,45 +403,51 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
         Ok(())
     }
-    pub fn get_or_load_library(&mut self, name: &Located<LibraryName>) -> Result<&Library<R, E>> {
-        if self.loaded_libs.contains_key(name) {
-            match self.loaded_libs.get(name).unwrap() {
-                Some(lib) => return Ok(lib),
-                // library is loading
-                None => todo!("circular import is not supported"),
-            }
+    fn file_library_factory(&self, name: &Located<LibraryName>) -> Result<LibraryFactory<R, E>> {
+        let base_directory = if let Some(program_directory) = &self.program_directory {
+            program_directory.clone()
         } else {
-            // mark library is loading
-            self.loaded_libs.insert(name.data.clone(), None);
-            let library = self.search_library(name.clone())?;
-            Ok(self.load_library(library))
+            std::env::current_dir()?
+        };
+        // TODO: file extension, file system variants
+        let path = base_directory
+            .join(name.deref().path())
+            .with_extension("sld");
+        if path.exists() {
+            let char_stream = file_char_stream(&path)?;
+            LibraryFactory::from_char_stream(name.deref(), char_stream)
+        } else {
+            located_error!(
+                LogicError::LibraryNotFound(name.deref().clone()),
+                name.location.clone()
+            )
         }
     }
-    pub fn load_library(&mut self, library: Library<R, E>) -> &Library<R, E> {
-        let name = library.name().clone();
-        self.loaded_libs
-            .insert(name.clone().extract_data(), Some(library));
-        self.loaded_libs.get(&name).unwrap().as_ref().unwrap()
-    }
-    pub fn search_library(&mut self, name: Located<LibraryName>) -> Result<Library<R, E>> {
-        match self.lib_searcher.search_lib(name.clone()) {
-            Some(path) => {
-                let lexer = Lexer::from_char_stream(file_char_stream(&path)?);
-                let parser = Parser::from_lexer(lexer);
-                let statements = parser.into_iter().collect::<Result<Vec<_>>>()?;
-                let library = self.eval_library(statements.iter())?;
-                if library.name().data == name.data {
-                    return Ok(library);
-                }
+    fn new_library(&mut self, factory: &LibraryFactory<R, E>) -> Result<Library<R, E>> {
+        match factory {
+            LibraryFactory::Native(name, f) => Ok(Library::new(name.clone().into(), f())),
+            LibraryFactory::AST(library_definition) => {
+                self.eval_library_definition(library_definition.deref())
             }
-            None => {}
         }
-        located_error!(LogicError::LibraryNotFound(name.data), name.location)
+    }
+    pub fn get_library(&mut self, name: Located<LibraryName>) -> Result<Library<R, E>> {
+        let factory = match self.lib_factories.get(&name) {
+            Some(factory) => factory,
+            None => {
+                let new_factory = self.file_library_factory(&name)?;
+                self.lib_factories
+                    .entry(name.deref().clone())
+                    .or_insert(Rc::new(new_factory))
+            }
+        }
+        .clone();
+        self.new_library(&factory)
     }
     pub fn eval_import_set(&mut self, import: &ImportSet) -> Result<Vec<(String, Value<R, E>)>> {
         match &import.data {
             ImportSetBody::Direct(lib_name) => {
-                let library = self.get_or_load_library(lib_name)?;
+                let library = self.get_library(lib_name.clone())?;
                 Ok(library
                     .iter_definitions()
                     .map(|(name, value)| (name.clone(), value.clone()))
@@ -490,22 +577,6 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
         Ok(Library::new(name, definitions))
     }
-    pub fn eval_library<'a>(
-        &mut self,
-        mut asts: impl Iterator<Item = &'a Statement>,
-    ) -> Result<Library<R, E>> {
-        match asts.next() {
-            Some(Statement::LibraryDefinition(library_definition)) => {
-                if asts.next().is_none() {
-                    return self.eval_library_definition(&library_definition.data);
-                }
-            }
-            _ => {}
-        }
-        error!(SyntaxError::ExpectSomething(
-            "exact one library definition".to_string()
-        ))
-    }
     pub fn eval_program<'a>(
         &mut self,
         asts: impl IntoIterator<Item = &'a Statement>,
@@ -520,6 +591,10 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             let mut parser = Parser::from_lexer(lexer);
             parser.try_fold(None, |_, statement| self.eval_root_ast(&statement?))
         }
+    }
+    pub fn eval_file(&mut self, path: PathBuf) -> Result<Option<Value<R, E>>> {
+        self.program_directory = path.clone().parent().map(Path::to_owned);
+        self.eval(file_char_stream(&path)?)
     }
 }
 
@@ -1225,28 +1300,52 @@ fn datum_literal() -> Result<()> {
 #[test]
 fn search_library() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    let library = interpreter.search_library(library_name!("scheme", "base").into())?;
-    assert!(library
-        .iter_definitions()
-        .find(|(name, _)| name.as_str() == "+")
-        .is_some());
-    // not exist
-    assert!(interpreter
-        .search_library(library_name!("lib", "not", "exist").into(),)
-        .is_err());
+    {
+        let library = interpreter.get_library(library_name!("scheme", "base").into())?;
+        assert!(library
+            .iter_definitions()
+            .find(|(name, _)| name.as_str() == "+")
+            .is_some());
+    }
+    {
+        // not exist
+        let library = interpreter.get_library(library_name!("lib", "not", "exist").into());
+        assert_eq!(
+            library,
+            error!(LogicError::LibraryNotFound(library_name!(
+                "lib", "not", "exist"
+            )))
+        );
+    }
+    let lib_not_exist_factory =
+        LibraryFactory::Native(library_name!("lib", "not", "exist"), || {
+            vec![("a".to_string(), Value::Boolean(false))]
+        });
+    // exist now
+    interpreter.register_library_factory(lib_not_exist_factory);
+    {
+        let library = interpreter.get_library(library_name!("lib", "not", "exist").into())?;
+        assert_eq!(
+            library
+                .iter_definitions()
+                .find(|(name, _)| name.as_str() == "a"),
+            Some((&"a".to_string(), &Value::Boolean(false)))
+        );
+    }
     Ok(())
 }
 
 #[test]
 fn import_set() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.load_library(Library::new(
+    interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
-        vec![
-            ("a".to_string(), Value::String("father".to_string())),
-            ("b".to_string(), Value::String("bob".to_string())),
-        ]
-        .into_iter(),
+        || {
+            vec![
+                ("a".to_string(), Value::String("father".to_string())),
+                ("b".to_string(), Value::String("bob".to_string())),
+            ]
+        },
     ));
     let direct = ImportSetBody::Direct(library_name!("foo", "bar").into());
     {
@@ -1287,17 +1386,17 @@ fn import_set() -> Result<()> {
     }
     Ok(())
 }
-
 #[test]
 fn import() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.load_library(Library::new(
+    interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
-        vec![
-            ("a".to_string(), Value::String("father".to_string())),
-            ("b".to_string(), Value::String("bob".to_string())),
-        ]
-        .into_iter(),
+        || {
+            vec![
+                ("a".to_string(), Value::String("father".to_string())),
+                ("b".to_string(), Value::String("bob".to_string())),
+            ]
+        },
     ));
     let import_declaration = ImportDeclaration(vec![
         ImportSetBody::Only(
@@ -1327,13 +1426,14 @@ fn import() -> Result<()> {
 #[test]
 fn library_definition() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.load_library(Library::new(
+    interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
-        vec![
-            ("a".to_string(), Value::String("father".to_string())),
-            ("b".to_string(), Value::String("bob".to_string())),
-        ]
-        .into_iter(),
+        || {
+            vec![
+                ("a".to_string(), Value::String("father".to_string())),
+                ("b".to_string(), Value::String("bob".to_string())),
+            ]
+        },
     ));
     {
         // empty library

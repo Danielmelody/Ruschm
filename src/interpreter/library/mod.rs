@@ -4,7 +4,7 @@ macro_rules! library_name {
         LibraryName(vec![$($e.into()),+])
     };
 }
-pub mod buildin;
+pub mod native;
 use itertools::Itertools;
 
 use crate::{environment::*, error::*, values::*};
@@ -13,7 +13,7 @@ use std::{collections::HashMap, fmt::Display, iter::FromIterator, path::PathBuf}
 // r7rs:
 // ⟨library name⟩ is a list whose members are identifiers and
 // exact non-negative integers.
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LibraryNameElement {
     Identifier(String),
     Integer(u32),
@@ -42,7 +42,7 @@ impl From<u32> for LibraryNameElement {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LibraryName(pub Vec<LibraryNameElement>);
 
 impl ToLocated for LibraryName {}
@@ -97,58 +97,11 @@ fn library_name_join() {
 }
 
 impl LibraryName {
-    fn path(&self) -> PathBuf {
+    pub fn path(&self) -> PathBuf {
         self.0
             .iter()
             .map(|element| PathBuf::from(format!("{}", element)))
             .collect()
-    }
-}
-
-pub trait LibrarySearcher {
-    fn search_lib(&self, library_name: Located<LibraryName>) -> Option<PathBuf>;
-}
-
-pub struct StandardLibrarySearcher {}
-
-impl StandardLibrarySearcher {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl LibrarySearcher for StandardLibrarySearcher {
-    fn search_lib(&self, library_name: Located<LibraryName>) -> Option<PathBuf> {
-        match std::env::current_dir() {
-            Ok(pwd) => Some(
-                pwd.join("lib")
-                    .join(library_name.extract_data().path())
-                    .with_extension("sld"),
-            ),
-            Err(_) => None,
-        }
-    }
-}
-
-#[test]
-fn standard_library_searcher() {
-    let searcher = StandardLibrarySearcher::new();
-    match std::env::current_dir() {
-        Ok(pwd) => {
-            assert_eq!(
-                searcher.search_lib(library_name!("s", 0, "a").into()),
-                Some(
-                    pwd.join("lib")
-                        .join("s")
-                        .join("0")
-                        .join("a")
-                        .with_extension("sld")
-                )
-            );
-        }
-        Err(_) => {
-            assert_eq!(searcher.search_lib(library_name!("s", 0, "a").into()), None);
-        }
     }
 }
 
