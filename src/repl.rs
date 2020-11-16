@@ -32,12 +32,7 @@ pub fn run() {
 
     println!("Ruschm Version {}", VERSION);
     // import all standard libraries for REPL
-    match it.import_standards() {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("{}", e);
-        }
-    }
+    it.import_standards();
     loop {
         let readline = match source.is_empty() {
             true => rl.readline("> "),
