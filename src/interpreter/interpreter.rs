@@ -46,7 +46,7 @@ fn library_factory() -> Result<()> {
     assert_eq!(
         it.get_library(library_name!("foo").into()),
         Ok(Library::new(
-            library_name!("foo").locate(Some([1, 18])),
+            library_name!("foo").into(),
             vec![("a".to_string(), Value::Number(Number::Integer(1)))]
         ))
     );
@@ -86,6 +86,7 @@ enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
 pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub env: Rc<E>,
     lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R, E>>>,
+    imported_library: HashSet<LibraryName>,
     import_end: bool, // indicate program's import declaration part end
     pub program_directory: Option<PathBuf>,
     _marker: PhantomData<R>,
@@ -96,6 +97,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         let mut interpreter = Self {
             env: Rc::new(E::new()),
             lib_factories: HashMap::new(),
+            imported_library: HashSet::new(),
             import_end: false,
             program_directory: None,
             _marker: PhantomData,
@@ -446,11 +448,22 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn eval_import_set(&mut self, import: &ImportSet) -> Result<Vec<(String, Value<R, E>)>> {
         match &import.data {
             ImportSetBody::Direct(lib_name) => {
-                let library = self.get_library(lib_name.clone())?;
-                Ok(library
-                    .iter_definitions()
-                    .map(|(name, value)| (name.clone(), value.clone()))
-                    .collect())
+                if self
+                    .imported_library
+                    .insert(lib_name.clone().extract_data())
+                {
+                    let library = self.get_library(lib_name.clone())?;
+                    self.imported_library.remove(lib_name);
+                    Ok(library
+                        .iter_definitions()
+                        .map(|(name, value)| (name.clone(), value.clone()))
+                        .collect())
+                } else {
+                    located_error!(
+                        LogicError::LibraryImportCyclic(lib_name.clone().extract_data()),
+                        lib_name.location
+                    )
+                }
             }
             ImportSetBody::Only(import_set, identifiers) => {
                 let id_set = identifiers.into_iter().collect::<HashSet<_>>();
@@ -1537,5 +1550,20 @@ fn library_definition() -> Result<()> {
         );
     }
 
+    Ok(())
+}
+
+#[test]
+fn import_cyclic() -> Result<()> {
+    let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
+    it.register_library_factory(LibraryFactory::from_char_stream(
+        &library_name!("foo"),
+        "(define-library (foo) (import (foo)))".chars(),
+    )?);
+    let result = it.get_library(library_name!("foo").into());
+    assert_eq!(
+        result,
+        error!(LogicError::LibraryImportCyclic(library_name!("foo")))
+    );
     Ok(())
 }

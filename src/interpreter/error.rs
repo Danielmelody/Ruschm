@@ -39,4 +39,6 @@ pub enum LogicError {
     Extension(String),
     #[error("library {0} not found")]
     LibraryNotFound(LibraryName),
+    #[error("detect import cyclic while importing library {0}")]
+    LibraryImportCyclic(LibraryName),
 }
