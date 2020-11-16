@@ -30,7 +30,23 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     fn new_child(parent: Rc<Self>) -> Self
     where
         Self: Sized;
-
+    /// iterate all local definitions in environment
+    /// # Example
+    /// ```
+    /// use ruschm::environment::{IEnvironment, StandardEnv};
+    /// use ruschm::values::Value;
+    /// use std::collections::HashMap;
+    /// let env = StandardEnv::<f32>::new();
+    /// env.define("a".to_string(), Value::Void);
+    /// env.define("b".to_string(), Value::Boolean(true));
+    /// let mut definitions = env.iter_local_definitions();
+    /// let mut result = HashMap::new();
+    /// for (name, value) in definitions.as_mut() {
+    ///     result.insert(name, value);
+    /// }
+    /// assert_eq!(result[&"a".to_string()], &Value::Void);
+    /// assert_eq!(result[&"b".to_string()], &Value::Boolean(true));
+    /// ```
     fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R, Self>>;
 }
 
