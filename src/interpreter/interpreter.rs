@@ -131,7 +131,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             Rc::new(library_factory),
         );
     }
-    pub fn import_standards(&mut self) -> Result<()> {
+    pub fn import_standards(&mut self) {
         let standard_libraries = vec![
             library_name!("scheme", "base"),
             library_name!("scheme", "write"),
@@ -139,12 +139,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         ];
         for lib_name in standard_libraries {
             let env = self.env.clone();
-            let library = self.get_library(lib_name.clone().into())?;
+            let library = self.get_library(lib_name.clone().into()).unwrap();
             for (name, value) in library.iter_definitions() {
                 env.clone().define(name.clone(), value.clone())
             }
         }
-        Ok(())
     }
 
     fn apply_scheme_procedure<'a>(
@@ -601,7 +600,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 #[test]
 fn number() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     assert_eq!(
         interpreter
             .eval_root_expression(ExpressionBody::Primitive(Primitive::Integer(-1)).into())?,
@@ -624,7 +623,7 @@ fn number() -> Result<()> {
 #[test]
 fn arithmetic() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
             Box::new(Expression::from(ExpressionBody::Identifier(
@@ -768,7 +767,7 @@ fn arithmetic() -> Result<()> {
 #[test]
 fn undefined() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::Identifier(
             "foo".to_string()
@@ -781,7 +780,7 @@ fn undefined() -> Result<()> {
 #[test]
 fn variable_definition() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "a".to_string(),
@@ -805,7 +804,7 @@ fn variable_definition() -> Result<()> {
 #[test]
 fn variable_assignment() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "a".to_string(),
@@ -829,7 +828,7 @@ fn variable_assignment() -> Result<()> {
 #[test]
 fn buildin_procedural() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "get-add".to_string(),
@@ -861,7 +860,7 @@ fn buildin_procedural() -> Result<()> {
 #[test]
 fn procedure_definition() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "add".to_string(),
@@ -898,7 +897,7 @@ fn procedure_definition() -> Result<()> {
 #[test]
 fn procedure_debug() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![Statement::Expression(simple_procedure(
         ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
         Expression::from(ExpressionBody::ProcedureCall(
@@ -919,7 +918,7 @@ fn procedure_debug() -> Result<()> {
 #[test]
 fn lambda_call() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![Statement::Expression(Expression::from(
         ExpressionBody::ProcedureCall(
             Box::new(simple_procedure(
@@ -955,7 +954,7 @@ fn lambda_call() -> Result<()> {
 #[test]
 fn closure() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "counter-creator".to_string(),
@@ -1021,7 +1020,7 @@ fn closure() -> Result<()> {
 #[test]
 fn condition() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     assert_eq!(
         interpreter.eval_program(
             vec![Statement::Expression(Expression::from(
@@ -1054,7 +1053,7 @@ fn condition() -> Result<()> {
 #[test]
 fn local_environment() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "adda".to_string(),
@@ -1092,7 +1091,7 @@ fn local_environment() -> Result<()> {
 #[test]
 fn procedure_as_data() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "add".to_string(),
@@ -1152,7 +1151,7 @@ fn eval_tail_expression() -> Result<()> {
         ExpressionBody::Primitive(Primitive::Integer(5)),
     ]);
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     {
         let expression = ExpressionBody::Primitive(Primitive::Integer(3)).into();
         assert_eq!(
@@ -1238,7 +1237,7 @@ fn eval_tail_expression() -> Result<()> {
 #[test]
 fn datum_literal() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards()?;
+    interpreter.import_standards();
     assert_eq!(
         Interpreter::eval_expression(
             &ExpressionBody::Quote(Box::new(
