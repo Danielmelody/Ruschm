@@ -23,7 +23,7 @@ fn check_bracket_closed(chars: impl Iterator<Item = char>) -> bool {
 
 pub fn run() {
     // currently rust is lack of higher kind type (HKT), so we need write f32 twice
-    let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut it = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
     let mut rl = Editor::<()>::new();
     io::stdout().flush().unwrap();
     let mut source = String::new();
@@ -31,8 +31,6 @@ pub fn run() {
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
     println!("Ruschm Version {}", VERSION);
-    // import all standard libraries for REPL
-    it.import_standards();
     loop {
         let readline = match source.is_empty() {
             true => rl.readline("> "),

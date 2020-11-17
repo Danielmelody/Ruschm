@@ -124,8 +124,7 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
 
 #[test]
 fn iter_envs() -> Result<(), Box<dyn std::error::Error>> {
-    let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
-    it.import_standards();
+    let it = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
     {
         it.env.define("a".to_string(), Value::Void);
     }
