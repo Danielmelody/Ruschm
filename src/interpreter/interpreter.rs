@@ -102,50 +102,47 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             program_directory: None,
             _marker: PhantomData,
         };
-        interpreter.register_library_factory(LibraryFactory::Native(
-            library_name!("ruschm", "base"),
-            native::base::library_map,
-        ));
-        interpreter.register_library_factory(LibraryFactory::Native(
-            library_name!("ruschm", "write"),
-            native::write::library_map,
-        ));
-        interpreter.register_library_factory(
-            LibraryFactory::from_char_stream(
-                &library_name!("scheme", "base"),
-                include_str!("library/include/scheme/base.sld").chars(),
-            )
-            .unwrap(),
-        );
-        interpreter.register_library_factory(
-            LibraryFactory::from_char_stream(
-                &library_name!("scheme", "write"),
-                include_str!("library/include/scheme/write.sld").chars(),
-            )
-            .unwrap(),
-        );
-
+        interpreter.register_stdlib_factories();
         interpreter
     }
+
+    pub fn new_with_stdlib() -> Self {
+        let mut interpreter = Interpreter::<R, E>::new();
+        interpreter.eval("(import (scheme base))".chars()).unwrap();
+        interpreter.eval("(import (scheme write))".chars()).unwrap();
+        interpreter
+    }
+
     pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R, E>) {
         self.lib_factories.insert(
             library_factory.get_library_name().clone(),
             Rc::new(library_factory),
         );
     }
-    pub fn import_standards(&mut self) {
-        let standard_libraries = vec![
-            library_name!("scheme", "base"),
-            library_name!("scheme", "write"),
-            // TODO: other standard library
-        ];
-        for lib_name in standard_libraries {
-            let env = self.env.clone();
-            let library = self.get_library(lib_name.clone().into()).unwrap();
-            for (name, value) in library.iter_definitions() {
-                env.clone().define(name.clone(), value.clone())
-            }
-        }
+
+    fn register_stdlib_factories(&mut self) {
+        self.register_library_factory(LibraryFactory::Native(
+            library_name!("ruschm", "base"),
+            native::base::library_map,
+        ));
+        self.register_library_factory(LibraryFactory::Native(
+            library_name!("ruschm", "write"),
+            native::write::library_map,
+        ));
+        self.register_library_factory(
+            LibraryFactory::from_char_stream(
+                &library_name!("scheme", "base"),
+                include_str!("library/include/scheme/base.sld").chars(),
+            )
+            .unwrap(),
+        );
+        self.register_library_factory(
+            LibraryFactory::from_char_stream(
+                &library_name!("scheme", "write"),
+                include_str!("library/include/scheme/write.sld").chars(),
+            )
+            .unwrap(),
+        );
     }
 
     fn apply_scheme_procedure<'a>(
@@ -612,8 +609,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 
 #[test]
 fn number() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
     assert_eq!(
         interpreter
             .eval_root_expression(ExpressionBody::Primitive(Primitive::Integer(-1)).into())?,
@@ -635,8 +631,8 @@ fn number() -> Result<()> {
 
 #[test]
 fn arithmetic() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
             Box::new(Expression::from(ExpressionBody::Identifier(
@@ -779,8 +775,8 @@ fn arithmetic() -> Result<()> {
 
 #[test]
 fn undefined() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::Identifier(
             "foo".to_string()
@@ -793,7 +789,7 @@ fn undefined() -> Result<()> {
 #[test]
 fn variable_definition() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "a".to_string(),
@@ -817,7 +813,7 @@ fn variable_definition() -> Result<()> {
 #[test]
 fn variable_assignment() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "a".to_string(),
@@ -840,8 +836,8 @@ fn variable_assignment() -> Result<()> {
 
 #[test]
 fn buildin_procedural() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "get-add".to_string(),
@@ -872,8 +868,8 @@ fn buildin_procedural() -> Result<()> {
 
 #[test]
 fn procedure_definition() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "add".to_string(),
@@ -910,7 +906,7 @@ fn procedure_definition() -> Result<()> {
 #[test]
 fn procedure_debug() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+
     let program = vec![Statement::Expression(simple_procedure(
         ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
         Expression::from(ExpressionBody::ProcedureCall(
@@ -930,8 +926,8 @@ fn procedure_debug() -> Result<()> {
 
 #[test]
 fn lambda_call() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     let program = vec![Statement::Expression(Expression::from(
         ExpressionBody::ProcedureCall(
             Box::new(simple_procedure(
@@ -966,8 +962,8 @@ fn lambda_call() -> Result<()> {
 
 #[test]
 fn closure() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "counter-creator".to_string(),
@@ -1033,7 +1029,7 @@ fn closure() -> Result<()> {
 #[test]
 fn condition() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+
     assert_eq!(
         interpreter.eval_program(
             vec![Statement::Expression(Expression::from(
@@ -1065,8 +1061,8 @@ fn condition() -> Result<()> {
 
 #[test]
 fn local_environment() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "adda".to_string(),
@@ -1103,8 +1099,8 @@ fn local_environment() -> Result<()> {
 
 #[test]
 fn procedure_as_data() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
             "add".to_string(),
@@ -1163,8 +1159,8 @@ fn eval_tail_expression() -> Result<()> {
         ExpressionBody::Primitive(Primitive::Integer(2)),
         ExpressionBody::Primitive(Primitive::Integer(5)),
     ]);
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+
     {
         let expression = ExpressionBody::Primitive(Primitive::Integer(3)).into();
         assert_eq!(
@@ -1249,8 +1245,8 @@ fn eval_tail_expression() -> Result<()> {
 
 #[test]
 fn datum_literal() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
-    interpreter.import_standards();
+    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+
     assert_eq!(
         Interpreter::eval_expression(
             &ExpressionBody::Quote(Box::new(
