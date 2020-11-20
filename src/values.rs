@@ -385,11 +385,11 @@ fn number_exact() {
 pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
 
 #[derive(Clone, PartialEq)]
-pub enum BuildinProcedurePointer<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+pub enum BuiltinProcedurePointer<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Pure(fn(ArgVec<R, E>) -> Result<Value<R, E>>),
     Impure(fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>),
 }
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuildinProcedurePointer<R, E> {
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuiltinProcedurePointer<R, E> {
     pub fn apply(&self, args: ArgVec<R, E>, env: &Rc<E>) -> Result<Value<R, E>> {
         match &self {
             Self::Pure(pointer) => pointer(args),
@@ -398,18 +398,18 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuildinProcedurePointer<R, 
     }
 }
 #[derive(Clone, PartialEq)]
-pub struct BuildinProcedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+pub struct BuiltinProcedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub name: &'static str,
     pub parameters: ParameterFormals,
-    pub pointer: BuildinProcedurePointer<R, E>,
+    pub pointer: BuiltinProcedurePointer<R, E>,
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for BuildinProcedure<R, E> {
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for BuiltinProcedure<R, E> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "<build-in procedure ({})>", self.name)
     }
 }
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for BuildinProcedure<R, E> {
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for BuiltinProcedure<R, E> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", self)
     }
@@ -418,14 +418,14 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for BuildinProcedure<
 #[derive(Clone)]
 pub enum Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     User(SchemeProcedure, Rc<E>),
-    Buildin(BuildinProcedure<R, E>),
+    Builtin(BuiltinProcedure<R, E>),
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for Procedure<R, E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::User(p, _) => write!(f, "{:?}", p),
-            Self::Buildin(b) => write!(f, "{:?}", b),
+            Self::Builtin(b) => write!(f, "{:?}", b),
         }
     }
 }
@@ -434,7 +434,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for Procedure<R, 
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::User(a, _), Self::User(b, _)) => a == b,
-            (Self::Buildin(a), Self::Buildin(b)) => a == b,
+            (Self::Builtin(a), Self::Builtin(b)) => a == b,
             _ => false,
         }
     }
@@ -443,32 +443,32 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for Procedure<R, 
 impl ParameterFormals {}
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
-    pub fn new_buildin_pure(
+    pub fn new_builtin_pure(
         name: &'static str,
         parameters: ParameterFormals,
         pointer: fn(ArgVec<R, E>) -> Result<Value<R, E>>,
     ) -> Self {
-        Self::Buildin(BuildinProcedure {
+        Self::Builtin(BuiltinProcedure {
             name,
             parameters,
-            pointer: BuildinProcedurePointer::Pure(pointer),
+            pointer: BuiltinProcedurePointer::Pure(pointer),
         })
     }
-    pub fn new_buildin_impure(
+    pub fn new_builtin_impure(
         name: &'static str,
         parameters: ParameterFormals,
         pointer: fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>,
     ) -> Self {
-        Self::Buildin(BuildinProcedure {
+        Self::Builtin(BuiltinProcedure {
             name,
             parameters,
-            pointer: BuildinProcedurePointer::Impure(pointer),
+            pointer: BuiltinProcedurePointer::Impure(pointer),
         })
     }
     pub fn get_parameters(&self) -> &ParameterFormals {
         match &self {
             Procedure::User(user, ..) => &user.0,
-            Procedure::Buildin(buildin) => &buildin.parameters,
+            Procedure::Builtin(builtin) => &builtin.parameters,
         }
     }
 }
@@ -477,7 +477,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Procedure<R, E>
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match &self {
             Procedure::User(procedure, ..) => write!(f, "{}", procedure),
-            Procedure::Buildin(fp) => write!(f, "{}", fp),
+            Procedure::Builtin(fp) => write!(f, "{}", fp),
         }
     }
 }

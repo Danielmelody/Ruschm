@@ -3,7 +3,7 @@
 use error::SyntaxError;
 
 use crate::{
-    environment::*, library_name, values::BuildinProcedure, values::Number,
+    environment::*, library_name, values::BuiltinProcedure, values::Number,
     values::RealNumberInternalTrait, values::ValueReference,
 };
 use crate::{error::*, values::Value};
@@ -209,7 +209,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             } else {
                 current_procedure.as_ref().unwrap()
             } {
-                Procedure::Buildin(BuildinProcedure { pointer, .. }) => {
+                Procedure::Builtin(BuiltinProcedure { pointer, .. }) => {
                     break pointer.apply(args, env);
                 }
                 Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
@@ -835,7 +835,7 @@ fn variable_assignment() -> Result<()> {
 }
 
 #[test]
-fn buildin_procedural() -> Result<()> {
+fn builtin_procedural() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
 
     let program = vec![
