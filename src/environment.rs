@@ -30,6 +30,13 @@ pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + Pa
     fn new_child(parent: Rc<Self>) -> Self
     where
         Self: Sized;
+
+    fn new_lib(_root: Rc<Self>) -> Self
+    where
+        Self: Sized,
+    {
+        Self::new()
+    }
     /// iterate all local definitions in environment
     /// # Example
     /// ```

@@ -558,7 +558,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         let name = library_definition.0.clone();
         let mut definitions = HashMap::new();
         let mut final_exports = Vec::new();
-        let lib_env = Rc::new(E::new());
+        let lib_env = Rc::new(E::new_lib(self.env.clone()));
         for declaration in &library_definition.1 {
             match &declaration.data {
                 LibraryDeclaration::ImportDeclaration(imports) => {
