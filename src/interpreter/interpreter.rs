@@ -180,7 +180,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             local_env.define(param.clone(), arg);
         }
         if let Some(variadic) = &formals.1 {
-            let list = arg_iter.collect();
+            let list = arg_iter.rev().collect();
             local_env.define(variadic.clone(), list);
         }
         for DefinitionBody(name, expr) in internal_definitions.into_iter().map(|d| &d.data) {
