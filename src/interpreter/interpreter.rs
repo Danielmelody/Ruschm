@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use error::SyntaxError;
-
+#[cfg(test)]
+use crate::values::Transformer;
 use crate::{
     environment::*, library_name, values::BuiltinProcedure, values::Number,
     values::RealNumberInternalTrait, values::ValueReference,
@@ -12,6 +12,7 @@ use crate::{
     values::{ArgVec, Type},
 };
 use crate::{parser::*, values::Procedure};
+use error::SyntaxError;
 
 use std::{collections::HashMap, ops::Deref, path::Path, rc::Rc};
 use std::{collections::HashSet, iter::Iterator};
@@ -348,7 +349,6 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             Primitive::Rational(a, b) => Value::Number(Number::Rational(*a, *b as i32)),
         })
     }
-
     pub fn eval_expression(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
         Ok(match &expression.data {
             ExpressionBody::Primitive(datum) => Self::eval_primitive(datum)?,
@@ -358,13 +358,30 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             ExpressionBody::Vector(_) => Self::read_literal(&expression, env)?,
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
                 let first = Self::eval_expression(procedure_expr, env)?;
-                let evaluated_args: Result<ArgVec<_, _>> = arguments
-                    .into_iter()
-                    .map(|arg| Self::eval_expression(arg, env))
-                    .collect();
                 match first {
                     Value::Procedure(procedure) => {
+                        let evaluated_args: Result<ArgVec<_, _>> = arguments
+                            .into_iter()
+                            .map(|arg| Self::eval_expression(arg, env))
+                            .collect();
                         Self::apply_procedure(&procedure, evaluated_args?, env)?
+                    }
+                    Value::Transformer(transformer) => {
+                        let location = procedure_expr.location;
+                        let mut transformed = transformer.transform(arguments.clone())?.into_iter();
+                        let expression = if let Some(statement) = transformed.next() {
+                            statement.expect_expression()?
+                        } else {
+                            return located_error!(
+                                SyntaxError::ExpectSomething("expression".to_string()),
+                                location
+                            );
+                        };
+
+                        if transformed.next().is_some() {
+                            panic!("transformer expand to multiple statements unsupported")
+                        }
+                        Self::eval_expression(&expression, env)?
                     }
                     other => {
                         return located_error!(
@@ -523,7 +540,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
 
-    pub fn eval_expression_or_definition(
+    pub fn eval_expression_statement_or_definition(
         &mut self,
         statement: &Statement,
         env: Rc<E>,
@@ -562,11 +579,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 }
                 other => {
                     self.import_end = true;
-                    self.eval_expression_or_definition(other, env)?
+                    self.eval_expression_statement_or_definition(other, env)?
                 }
             })
         } else {
-            self.eval_expression_or_definition(ast, env)
+            self.eval_expression_statement_or_definition(ast, env)
         }
     }
 
@@ -590,7 +607,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 LibraryDeclaration::Export(exports) => final_exports.extend(exports.iter()),
                 LibraryDeclaration::Begin(statements) => {
                     for statement in statements.iter() {
-                        self.eval_expression_or_definition(statement, lib_env.clone())?;
+                        self.eval_expression_statement_or_definition(statement, lib_env.clone())?;
                     }
                 }
             }
@@ -1583,6 +1600,41 @@ fn import_cyclic() -> Result<()> {
     assert_eq!(
         result,
         error!(LogicError::LibraryImportCyclic(library_name!("foo")))
+    );
+    Ok(())
+}
+
+#[test]
+fn transformer() -> Result<()> {
+    let it = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    // transform to expression
+    it.env.define(
+        "foo".to_string(),
+        Value::Transformer(Transformer::Native(|expressions| {
+            Ok(vec![Statement::Expression(
+                ExpressionBody::ProcedureCall(
+                    Box::new(ExpressionBody::Identifier("+".to_string()).into()),
+                    expressions.into_iter().collect(),
+                )
+                .into(),
+            )])
+        })),
+    );
+    let env = it.env.clone();
+    assert_eq!(
+        Interpreter::eval_expression(
+            &ExpressionBody::ProcedureCall(
+                Box::new(ExpressionBody::Identifier("foo".to_string()).into()),
+                vec![
+                    ExpressionBody::Primitive(Primitive::Integer(1)).into(),
+                    ExpressionBody::Primitive(Primitive::Integer(2)).into(),
+                    ExpressionBody::Primitive(Primitive::Integer(3)).into(),
+                ],
+            )
+            .into(),
+            &env,
+        ),
+        Ok(Value::Number(Number::Integer(6)))
     );
     Ok(())
 }
