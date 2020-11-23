@@ -52,6 +52,28 @@ pub enum Statement {
     LibraryDefinition(Located<LibraryDefinition>),
 }
 
+impl Statement {
+    fn location(&self) -> Option<[u32; 2]> {
+        match self {
+            Statement::ImportDeclaration(located) => located.location,
+            Statement::Definition(located) => located.location,
+            Statement::SyntaxDefinition(located) => located.location,
+            Statement::Expression(located) => located.location,
+            Statement::LibraryDefinition(located) => located.location,
+        }
+    }
+    pub fn expect_expression(self) -> Result<Expression> {
+        let location = self.location();
+        match self {
+            Self::Expression(expression) => Ok(expression),
+            _ => located_error!(
+                SyntaxError::ExpectSomething("expression".to_string()),
+                location
+            ),
+        }
+    }
+}
+
 impl Into<Statement> for Expression {
     fn into(self) -> Statement {
         Statement::Expression(self)

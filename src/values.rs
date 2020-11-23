@@ -12,8 +12,13 @@ use num_traits::real::Real;
 use smallvec::SmallVec;
 
 use crate::{
-    environment::*, error::*, interpreter::error::LogicError, interpreter::pair::Pair,
-    parser::ParameterFormals, parser::SchemeProcedure,
+    environment::*,
+    error::*,
+    interpreter::error::LogicError,
+    interpreter::pair::Pair,
+    parser::Expression,
+    parser::ParameterFormals,
+    parser::{SchemeProcedure, Statement},
 };
 
 type Result<T> = std::result::Result<T, SchemeError>;
@@ -590,6 +595,7 @@ pub enum Type {
     Pair,
     EmptyList,
     Void,
+    Transformer,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -604,6 +610,7 @@ pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Pair(Box<Pair<R, E>>),
     EmptyList,
     Void,
+    Transformer(Transformer),
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
@@ -634,6 +641,9 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     pub fn expect_boolean(self) -> Result<bool> {
         match_expect_type!(self, Value::Boolean(condition) => condition, Type::Boolean)
     }
+    pub fn expect_transformer(self) -> Result<Transformer> {
+        match_expect_type!(self, Value::Transformer(transformer) => transformer, Type::Transformer)
+    }
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Value<R, E> {
@@ -650,6 +660,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Value<R, E> {
             Value::Vector(vecref) => write!(f, "#({})", vecref),
             Value::Pair(list) => write!(f, "{}", list),
             Value::EmptyList => write!(f, "()"),
+            Value::Transformer(transformer) => write!(f, "{}", transformer),
         }
     }
 }
@@ -658,5 +669,29 @@ fn check_division_by_zero(num: i32) -> Result<()> {
     match num {
         0 => error!(LogicError::DivisionByZero),
         _ => Ok(()),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Transformer {
+    Native(fn(SmallVec<[Expression; 4]>) -> Result<Vec<Statement>>),
+}
+
+impl Display for Transformer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Transformer::Native(_) => write!(f, "<build-in transformer>"),
+        }
+    }
+}
+
+impl Transformer {
+    pub fn transform(
+        &self,
+        expression_arguments: impl IntoIterator<Item = Expression>,
+    ) -> Result<Vec<Statement>> {
+        match self {
+            Transformer::Native(f) => f(expression_arguments.into_iter().collect()),
+        }
     }
 }
