@@ -1,17 +1,15 @@
 #![allow(dead_code)]
 
-use error::SyntaxError;
-
+#[cfg(test)]
+use crate::values::{Transformer, Type};
 use crate::{
     environment::*, library_name, values::BuiltinProcedure, values::Number,
     values::RealNumberInternalTrait, values::ValueReference,
 };
 use crate::{error::*, values::Value};
-use crate::{
-    file::file_char_stream,
-    values::{ArgVec, Type},
-};
+use crate::{file::file_char_stream, values::ArgVec};
 use crate::{parser::*, values::Procedure};
+use error::SyntaxError;
 
 use std::{collections::HashMap, ops::Deref, path::Path, rc::Rc};
 use std::{collections::HashSet, iter::Iterator};
@@ -78,8 +76,21 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryFactory<R, E> {
 
 #[derive(Debug, Clone, PartialEq)]
 enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    TailCall(&'a Expression, &'a [Expression], Rc<E>),
+    TailCall(TailCall<'a, R, E>),
     Value(Value<R, E>),
+}
+#[derive(Debug, Clone, PartialEq)]
+enum TailCall<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    Ref(&'a Expression, &'a [Expression], Rc<E>),
+    Owned(Expression, Vec<Expression>, Rc<E>, PhantomData<R>),
+}
+impl<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> TailCall<'a, R, E> {
+    pub fn as_ref(&'a self) -> (&'a Expression, &'a [Expression], &Rc<E>) {
+        match self {
+            TailCall::Ref(procedure_expr, arguments, env) => (procedure_expr, arguments, env),
+            TailCall::Owned(procedure_expr, arguments, env, _) => (procedure_expr, arguments, env),
+        }
+    }
 }
 pub struct LibraryLoader<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R, E>>>,
@@ -243,11 +254,9 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                         args,
                     )?;
                     match apply_result {
-                        TailExpressionResult::TailCall(
-                            tail_procedure_expr,
-                            tail_arguments,
-                            last_env,
-                        ) => {
+                        TailExpressionResult::TailCall(tail_call) => {
+                            let (tail_procedure_expr, tail_arguments, last_env) =
+                                tail_call.as_ref();
                             let (tail_procedure, tail_args) = Self::eval_procedure_call(
                                 tail_procedure_expr,
                                 tail_arguments,
@@ -271,7 +280,17 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     ) -> Result<TailExpressionResult<'a, R, E>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
-                TailExpressionResult::TailCall(procedure_expr.as_ref(), arguments, env)
+                if let Some(expanded) =
+                    Self::try_expand_expression(procedure_expr, arguments, &env)?
+                {
+                    Self::eval_owned_tail_expression(expanded, env)?
+                } else {
+                    TailExpressionResult::TailCall(TailCall::Ref(
+                        procedure_expr.as_ref(),
+                        arguments,
+                        env,
+                    ))
+                }
             }
             ExpressionBody::Conditional(cond) => {
                 let (test, consequent, alternative) = cond.as_ref();
@@ -283,6 +302,47 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                         Some(alter) => Self::eval_tail_expression(alter, env)?,
                         None => TailExpressionResult::Value(Value::Void),
                     }
+                }
+            }
+            _ => TailExpressionResult::Value(Self::eval_expression(&expression, &env)?),
+        })
+    }
+    // during eval_tail_expression, some expression will expand to owned expression
+    // it has to repeat this logic for owned expression, no other workaround
+    fn eval_owned_tail_expression<'a>(
+        expression: Expression,
+        env: Rc<E>,
+    ) -> Result<TailExpressionResult<'a, R, E>> {
+        Ok(match &expression.data {
+            ExpressionBody::ProcedureCall(..) | ExpressionBody::Conditional(_) => {
+                match expression.extract_data() {
+                    ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
+                        if let Some(expanded) =
+                            Self::try_expand_expression(procedure_expr.as_ref(), &arguments, &env)?
+                        {
+                            Self::eval_owned_tail_expression(expanded, env)?
+                        } else {
+                            TailExpressionResult::TailCall(TailCall::Owned(
+                                *procedure_expr,
+                                arguments,
+                                env,
+                                PhantomData,
+                            ))
+                        }
+                    }
+                    ExpressionBody::Conditional(cond) => {
+                        let (test, consequent, alternative) = *cond;
+                        let condition = Self::eval_expression(&test, &env)?.expect_boolean()?;
+                        if condition {
+                            Self::eval_owned_tail_expression(consequent, env)?
+                        } else {
+                            match alternative {
+                                Some(alter) => Self::eval_owned_tail_expression(alter, env)?,
+                                None => TailExpressionResult::Value(Value::Void),
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
                 }
             }
             _ => TailExpressionResult::Value(Self::eval_expression(&expression, &env)?),
@@ -348,7 +408,37 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             Primitive::Rational(a, b) => Value::Number(Number::Rational(*a, *b as i32)),
         })
     }
+    fn try_expand_expression(
+        procedure_expr: &Expression,
+        arguments: &[Expression],
+        env: &Rc<E>,
+    ) -> Result<Option<Expression>> {
+        Ok(
+            if let Value::Transformer(transformer) = Self::eval_expression(procedure_expr, env)? {
+                Some({
+                    let location = procedure_expr.location;
+                    let mut transformed = transformer
+                        .transform(arguments.iter().cloned().collect::<Vec<_>>())?
+                        .into_iter();
+                    let expression = if let Some(statement) = transformed.next() {
+                        statement.expect_expression()?
+                    } else {
+                        return located_error!(
+                            SyntaxError::ExpectSomething("expression".to_string()),
+                            location
+                        );
+                    };
 
+                    if transformed.next().is_some() {
+                        panic!("transformer expand to multiple statements unsupported")
+                    }
+                    expression
+                })
+            } else {
+                None
+            },
+        )
+    }
     pub fn eval_expression(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
         Ok(match &expression.data {
             ExpressionBody::Primitive(datum) => Self::eval_primitive(datum)?,
@@ -357,21 +447,17 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             }
             ExpressionBody::Vector(_) => Self::read_literal(&expression, env)?,
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
-                let first = Self::eval_expression(procedure_expr, env)?;
-                let evaluated_args: Result<ArgVec<_, _>> = arguments
-                    .into_iter()
-                    .map(|arg| Self::eval_expression(arg, env))
-                    .collect();
-                match first {
-                    Value::Procedure(procedure) => {
-                        Self::apply_procedure(&procedure, evaluated_args?, env)?
-                    }
-                    other => {
-                        return located_error!(
-                            LogicError::TypeMisMatch(other.to_string(), Type::Procedure),
-                            procedure_expr.location
-                        )
-                    }
+                if let Some(expanded) = Self::try_expand_expression(procedure_expr, arguments, env)?
+                {
+                    Self::eval_expression(&expanded, env)?
+                } else {
+                    let procedure =
+                        Self::eval_expression(procedure_expr, env)?.expect_procedure()?;
+                    let evaluated_args: Result<ArgVec<_, _>> = arguments
+                        .into_iter()
+                        .map(|arg| Self::eval_expression(arg, env))
+                        .collect();
+                    Self::apply_procedure(&procedure, evaluated_args?, env)?
                 }
             }
             ExpressionBody::Period => {
@@ -523,7 +609,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
 
-    pub fn eval_expression_or_definition(
+    pub fn eval_expression_statement_or_definition(
         &mut self,
         statement: &Statement,
         env: Rc<E>,
@@ -562,11 +648,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 }
                 other => {
                     self.import_end = true;
-                    self.eval_expression_or_definition(other, env)?
+                    self.eval_expression_statement_or_definition(other, env)?
                 }
             })
         } else {
-            self.eval_expression_or_definition(ast, env)
+            self.eval_expression_statement_or_definition(ast, env)
         }
     }
 
@@ -590,7 +676,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 LibraryDeclaration::Export(exports) => final_exports.extend(exports.iter()),
                 LibraryDeclaration::Begin(statements) => {
                     for statement in statements.iter() {
-                        self.eval_expression_or_definition(statement, lib_env.clone())?;
+                        self.eval_expression_statement_or_definition(statement, lib_env.clone())?;
                     }
                 }
             }
@@ -1200,11 +1286,11 @@ fn eval_tail_expression() -> Result<()> {
         ));
         assert_eq!(
             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(
+            TailExpressionResult::TailCall(TailCall::Ref(
                 &Expression::from(ExpressionBody::Identifier("+".to_string())),
                 &expect_result,
                 interpreter.env.clone()
-            )
+            ))
         );
     }
     {
@@ -1220,11 +1306,11 @@ fn eval_tail_expression() -> Result<()> {
         ))));
         assert_eq!(
             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(
+            TailExpressionResult::TailCall(TailCall::Ref(
                 &Expression::from(ExpressionBody::Identifier("+".to_string())),
                 &expect_result,
                 interpreter.env.clone()
-            )
+            ))
         );
     }
     {
@@ -1256,11 +1342,11 @@ fn eval_tail_expression() -> Result<()> {
         ))));
         assert_eq!(
             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(
+            TailExpressionResult::TailCall(TailCall::Ref(
                 &Expression::from(ExpressionBody::Identifier("+".to_string())),
                 &expect_result,
                 interpreter.env.clone()
-            )
+            ))
         );
     }
     Ok(())
@@ -1584,5 +1670,65 @@ fn import_cyclic() -> Result<()> {
         result,
         error!(LogicError::LibraryImportCyclic(library_name!("foo")))
     );
+    Ok(())
+}
+
+#[test]
+fn transformer() -> Result<()> {
+    let it = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    // transform to expression
+    it.env.define(
+        "foo".to_string(),
+        Value::Transformer(Transformer::Native(|expressions| {
+            Ok(vec![Statement::Expression(
+                ExpressionBody::ProcedureCall(
+                    Box::new(ExpressionBody::Identifier("+".to_string()).into()),
+                    expressions.into_iter().collect(),
+                )
+                .into(),
+            )])
+        })),
+    );
+    let env = it.env.clone();
+    assert_eq!(
+        Interpreter::eval_expression(
+            &ExpressionBody::ProcedureCall(
+                Box::new(ExpressionBody::Identifier("foo".to_string()).into()),
+                vec![
+                    ExpressionBody::Primitive(Primitive::Integer(1)).into(),
+                    ExpressionBody::Primitive(Primitive::Integer(2)).into(),
+                    ExpressionBody::Primitive(Primitive::Integer(3)).into(),
+                ],
+            )
+            .into(),
+            &env,
+        ),
+        Ok(Value::Number(Number::Integer(6)))
+    );
+    assert_eq!(
+        Interpreter::eval_tail_expression(
+            &ExpressionBody::ProcedureCall(
+                Box::new(ExpressionBody::Identifier("foo".to_string()).into()),
+                vec![
+                    ExpressionBody::Primitive(Primitive::Integer(1)).into(),
+                    ExpressionBody::Primitive(Primitive::Integer(2)).into(),
+                    ExpressionBody::Primitive(Primitive::Integer(3)).into(),
+                ],
+            )
+            .into(),
+            env.clone(),
+        ),
+        Ok(TailExpressionResult::TailCall(TailCall::Owned(
+            ExpressionBody::Identifier("+".to_string()).into(),
+            vec![
+                ExpressionBody::Primitive(Primitive::Integer(1)).into(),
+                ExpressionBody::Primitive(Primitive::Integer(2)).into(),
+                ExpressionBody::Primitive(Primitive::Integer(3)).into(),
+            ],
+            env,
+            PhantomData
+        )))
+    );
+
     Ok(())
 }
