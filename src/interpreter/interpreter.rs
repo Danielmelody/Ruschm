@@ -21,7 +21,6 @@ use super::library::LibraryName;
 use super::library::{native, Library};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
-
 pub enum LibraryFactory<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Native(LibraryName, fn() -> Vec<(String, Value<R, E>)>),
     AST(Located<LibraryDefinition>),
@@ -82,10 +81,31 @@ enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
     TailCall(&'a Expression, &'a [Expression], Rc<E>),
     Value(Value<R, E>),
 }
+pub struct LibraryLoader<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+    lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R, E>>>,
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryLoader<R, E> {
+    pub fn new() -> Self {
+        Self {
+            lib_factories: HashMap::new(),
+        }
+    }
+    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R, E>) {
+        self.lib_factories.insert(
+            library_factory.get_library_name().clone(),
+            Rc::new(library_factory),
+        );
+    }
+    pub fn with_lib_factory(mut self, library_factory: LibraryFactory<R, E>) -> Self {
+        self.register_library_factory(library_factory);
+        self
+    }
+}
 
 pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub env: Rc<E>,
-    lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R, E>>>,
+    lib_loader: LibraryLoader<R, E>,
     imported_library: HashSet<LibraryName>,
     import_end: bool, // indicate program's import declaration part end
     pub program_directory: Option<PathBuf>,
@@ -96,7 +116,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn new() -> Self {
         let mut interpreter = Self {
             env: Rc::new(E::new()),
-            lib_factories: HashMap::new(),
+            lib_loader: LibraryLoader::new(),
             imported_library: HashSet::new(),
             import_end: false,
             program_directory: None,
@@ -113,11 +133,13 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         interpreter
     }
 
+    pub fn append_lib_loader(&mut self, lib_loader: LibraryLoader<R, E>) {
+        self.lib_loader
+            .lib_factories
+            .extend(lib_loader.lib_factories.into_iter());
+    }
     pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R, E>) {
-        self.lib_factories.insert(
-            library_factory.get_library_name().clone(),
-            Rc::new(library_factory),
-        );
+        self.lib_loader.register_library_factory(library_factory);
     }
 
     fn register_stdlib_factories(&mut self) {
@@ -430,11 +452,12 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
     pub fn get_library(&mut self, name: Located<LibraryName>) -> Result<Library<R, E>> {
-        let factory = match self.lib_factories.get(&name) {
+        let factory = match self.lib_loader.lib_factories.get(&name) {
             Some(factory) => factory,
             None => {
                 let new_factory = self.file_library_factory(&name)?;
-                self.lib_factories
+                self.lib_loader
+                    .lib_factories
                     .entry(name.deref().clone())
                     .or_insert(Rc::new(new_factory))
             }
