@@ -1,6 +1,6 @@
 (define-library (scheme base)
     (import (ruschm base))
-    (export car cdr eqv? eq? cons boolean? char? number? string? symbol? pair? procedure? vector? boolean=? + - * / 
+    (export apply car cdr eqv? eq? cons boolean? char? number? string? symbol? pair? procedure? vector? boolean=? + - * / 
         = < <= > >= min max sqrt floor ceiling exact floor-quotient floor-remainder newline vector make-vector
         vector-length vector-ref vector-set!
         caar cadr cdar cddr caaar caadr cadar caddr cdaar cdadr cddar cdddr list make-list null? append map for-each 
