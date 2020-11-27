@@ -195,10 +195,11 @@ impl<R: RealNumberInternalTrait> Number<R> {
             Number::Integer(num) => Number::Real(R::from(num).unwrap().sqrt()),
             Number::Real(num) => Number::Real(num.sqrt()),
             Number::Rational(a, b) => {
-                Number::Real(R::from(a).unwrap() / R::from(b).unwrap().sqrt())
+                Number::Real((R::from(a).unwrap() / R::from(b).unwrap()).sqrt())
             }
         }
     }
+
     pub fn floor(self) -> Self {
         match self {
             Number::Integer(num) => Number::Integer(num),
@@ -248,6 +249,14 @@ impl<R: RealNumberInternalTrait> Number<R> {
         }
     }
 }
+
+#[test]
+fn number_sqrt() {
+    assert_eq!(Number::<f32>::Integer(4).sqrt(), Number::Integer(2));
+    assert_eq!(Number::<f32>::Rational(9, 4).sqrt(), Number::Rational(3, 2));
+    assert_eq!(Number::<f32>::Real(9.0).sqrt(), Number::Real(3.0));
+}
+
 #[test]
 fn number_floor() {
     assert_eq!(Number::<f32>::Integer(5).floor(), Number::Integer(5));
