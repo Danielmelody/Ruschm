@@ -1,9 +1,11 @@
 (define-library (scheme base)
     (import (ruschm base))
-    (export apply car cdr eqv? eq? cons boolean? char? number? string? symbol? pair? procedure? vector? boolean=? + - * / 
+    (export apply car cdr eqv? eq? cons boolean? char? number? string? symbol? pair? procedure? vector? boolean=? + - * /
         = < <= > >= min max sqrt floor ceiling exact floor-quotient floor-remainder newline vector make-vector
         vector-length vector-ref vector-set!
-        caar cadr cdar cddr caaar caadr cadar caddr cdaar cdadr cddar cdddr list make-list null? append map for-each 
+        caar cadr cdar cddr caaar caadr cadar caddr cdaar cdadr cddar cdddr
+        list make-list null? append
+        map for-each fold-left fold-right
         list-tail list-ref last-pair head atom? equal? list?
     )
     (begin
@@ -53,6 +55,19 @@
         (define (for-each proc list)
             (if (pair? list)
                 ((lambda () (proc (car list)) (for-each proc (cdr list))))))
+
+        (define (fold-left f init seq)
+            (if (null? seq)
+                init
+                (fold-left f
+                           (f (car seq) init)
+                           (cdr seq))))
+
+        (define (fold-right f init seq)
+            (if (null? seq)
+                init
+                (f (car seq)
+                    (fold-right f init (cdr seq)))))
 
         (define (list-tail x k)
             (if (= k 0)
