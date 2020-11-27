@@ -190,14 +190,56 @@ impl<R: RealNumberInternalTrait> std::ops::Div<Number<R>> for Number<R> {
 }
 
 impl<R: RealNumberInternalTrait> Number<R> {
-    pub fn sqrt(self) -> Self {
+    fn as_real(self) -> R {
         match self {
-            Number::Integer(num) => Number::Real(R::from(num).unwrap().sqrt()),
-            Number::Real(num) => Number::Real(num.sqrt()),
-            Number::Rational(a, b) => {
-                Number::Real((R::from(a).unwrap() / R::from(b).unwrap()).sqrt())
-            }
+            Number::Integer(num) => R::from(num).unwrap(),
+            Number::Real(num) => num,
+            Number::Rational(a, b) => R::from(a).unwrap() / R::from(b).unwrap(),
         }
+    }
+
+    pub fn sqrt(self) -> Self {
+        Number::Real(self.as_real().sqrt())
+    }
+
+    pub fn exp(self) -> Self {
+        Number::Real(self.as_real().exp())
+    }
+
+    pub fn ln(self) -> Self {
+        Number::Real(self.as_real().ln())
+    }
+
+    pub fn log(self, base: Self) -> Self {
+        Number::Real(self.as_real().log(base.as_real()))
+    }
+
+    pub fn sin(self) -> Self {
+        Number::Real(self.as_real().sin())
+    }
+
+    pub fn cos(self) -> Self {
+        Number::Real(self.as_real().cos())
+    }
+
+    pub fn tan(self) -> Self {
+        Number::Real(self.as_real().tan())
+    }
+
+    pub fn asin(self) -> Self {
+        Number::Real(self.as_real().asin())
+    }
+
+    pub fn acos(self) -> Self {
+        Number::Real(self.as_real().acos())
+    }
+
+    pub fn atan(self) -> Self {
+        Number::Real(self.as_real().atan())
+    }
+
+    pub fn atan2(self, x: Self) -> Self {
+        Number::Real(self.as_real().atan2(x.as_real()))
     }
 
     pub fn floor(self) -> Self {

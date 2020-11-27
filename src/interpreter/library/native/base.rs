@@ -300,7 +300,7 @@ fn builtin_div() {
 }
 
 macro_rules! numeric_one_argument {
-    ($name:tt, $func:tt$(, $err_handle:tt)?) => {
+    ($func:tt$(, $err_handle:tt)?) => {
         fn $func<R: RealNumberInternalTrait, E: IEnvironment<R>>(
             arguments: impl IntoIterator<Item = Value<R, E>>
         ) -> Result<Value<R, E>> {
@@ -308,13 +308,20 @@ macro_rules! numeric_one_argument {
         }
     };
 }
-numeric_one_argument!("sqrt", sqrt);
 
-numeric_one_argument!("floor", floor);
+numeric_one_argument!(sqrt);
+numeric_one_argument!(exp);
+numeric_one_argument!(ln);
+numeric_one_argument!(sin);
+numeric_one_argument!(cos);
+numeric_one_argument!(tan);
+numeric_one_argument!(asin);
+numeric_one_argument!(acos);
+numeric_one_argument!(atan);
+numeric_one_argument!(floor);
+numeric_one_argument!(ceiling);
+numeric_one_argument!(exact, ?);
 
-numeric_one_argument!("ceiling", ceiling);
-
-numeric_one_argument!("exact", exact, ?);
 #[test]
 fn builtin_numeric_one() {
     {
@@ -325,7 +332,7 @@ fn builtin_numeric_one() {
 }
 
 macro_rules! numeric_two_arguments {
-    ($name:tt, $func:tt$(, $err_handle:tt)?) => {
+    ($func:tt$(, $err_handle:tt)?) => {
         fn $func<R: RealNumberInternalTrait, E: IEnvironment<R>>(
             arguments: impl IntoIterator<Item = Value<R, E>>
         ) -> Result<Value<R, E>> {
@@ -337,8 +344,11 @@ macro_rules! numeric_two_arguments {
     };
 }
 
-numeric_two_arguments!("floor-quotient", floor_quotient, ?);
-numeric_two_arguments!("floor-remainder", floor_remainder, ?);
+numeric_two_arguments!(floor_quotient, ?);
+numeric_two_arguments!(floor_remainder, ?);
+numeric_two_arguments!(log);
+numeric_two_arguments!(atan2);
+
 #[test]
 fn builtin_numeric_two() {
     {
@@ -800,6 +810,16 @@ pub fn library_map<R: RealNumberInternalTrait, E: IEnvironment<R>>() -> Vec<(Str
         pure_function_mapping!("min", vec!["x1".to_string()], Some("x".to_string()), min),
         pure_function_mapping!("max", vec!["x1".to_string()], Some("x".to_string()), max),
         pure_function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
+        pure_function_mapping!("exp", vec!["z".to_string()], None, exp),
+        pure_function_mapping!("ln", vec!["z".to_string()], None, ln),
+        pure_function_mapping!("log", vec!["z1".to_string(), "z2".to_string()], None, log),
+        pure_function_mapping!("sin", vec!["z".to_string()], None, sin),
+        pure_function_mapping!("cos", vec!["z".to_string()], None, cos),
+        pure_function_mapping!("tan", vec!["z".to_string()], None, tan),
+        pure_function_mapping!("asin", vec!["z".to_string()], None, asin),
+        pure_function_mapping!("acos", vec!["z".to_string()], None, acos),
+        pure_function_mapping!("atan", vec!["z".to_string()], None, atan),
+        pure_function_mapping!("atan2", vec!["y".to_string(), "x".to_string()], None, atan2),
         pure_function_mapping!("floor", vec!["x".to_string()], None, floor),
         pure_function_mapping!("ceiling", vec!["x".to_string()], None, ceiling),
         pure_function_mapping!("exact", vec!["x".to_string()], None, exact),
