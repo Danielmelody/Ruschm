@@ -15,12 +15,12 @@ fn apply<R: RealNumberInternalTrait, E: IEnvironment<R>>(
     let mut args = iter.collect::<ArgVec<R, E>>();
     if !args.is_empty() {
         let extended = args.pop().unwrap();
+
         let extended = match extended {
             Value::Pair(p) => p.into_iter().collect::<Result<ArgVec<R, E>>>()?,
             Value::EmptyList => ArgVec::new(),
-            _ => unreachable!(),
+            other => return error!(LogicError::TypeMisMatch(other.to_string(), Type::Pair))?,
         };
-
         args.extend(extended);
     }
     for arg in &args {
