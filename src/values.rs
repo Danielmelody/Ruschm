@@ -1,3 +1,4 @@
+use either::Either;
 use std::{
     cell::RefCell,
     cell::RefMut,
@@ -15,10 +16,12 @@ use crate::{
     environment::*,
     error::*,
     interpreter::error::LogicError,
-    interpreter::pair::Pair,
-    parser::Expression,
     parser::ParameterFormals,
-    parser::{SchemeProcedure, Statement},
+    parser::SchemeProcedure,
+    parser::{
+        pair::{GenericPair, Pairable},
+        Expression, Statement,
+    },
 };
 
 type Result<T> = std::result::Result<T, SchemeError>;
@@ -645,101 +648,6 @@ fn macro_match_expect_type() {
     );
 }
 
-// TODO: using enum as type when RFC 1450 is stable
-#[derive(Debug, PartialEq, Clone)]
-pub enum Type {
-    Number, // Non exhaustive, but ok
-    Integer,
-    Real,
-    Rational,
-    Boolean,
-    Character,
-    String,
-    Symbol,
-    Procedure,
-    Vector,
-    Pair,
-    EmptyList,
-    Void,
-    Transformer,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value<R: RealNumberInternalTrait> {
-    Number(Number<R>),
-    Boolean(bool),
-    Character(char),
-    String(String),
-    Symbol(String),
-    Procedure(Procedure<R>),
-    Vector(ValueReference<Vec<Value<R>>>),
-    Pair(Box<Pair<R>>),
-    EmptyList,
-    Void,
-    Transformer(Transformer),
-}
-
-impl<R: RealNumberInternalTrait> Value<R> {
-    pub fn expect_number(self) -> Result<Number<R>> {
-        match_expect_type!(self, Value::Number(number) => number, Type::Number)
-    }
-    pub fn expect_integer(self) -> Result<i32> {
-        match_expect_type!(self, Value::Number(Number::Integer(i)) => i, Type::Number)
-    }
-    pub fn expect_real(self) -> Result<R> {
-        match_expect_type!(self, Value::Number(Number::Real(r)) => r, Type::Real)
-    }
-    pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R>>>> {
-        match_expect_type!(self, Value::Vector(vector) => vector, Type::Vector)
-    }
-    pub fn expect_list_or_pair(self) -> Result<Pair<R>> {
-        match_expect_type!(self, Value::Pair(list) => *list, Type::Pair)
-    }
-    pub fn expect_string(self) -> Result<String> {
-        match_expect_type!(self, Value::String(string) => string, Type::String)
-    }
-    pub fn expect_symbol(self) -> Result<String> {
-        match_expect_type!(self, Value::Symbol(string) => string, Type::Symbol)
-    }
-    pub fn expect_procedure(self) -> Result<Procedure<R>> {
-        match_expect_type!(self, Value::Procedure(procedure) => procedure, Type::Procedure)
-    }
-    pub fn expect_boolean(self) -> Result<bool> {
-        match_expect_type!(self, Value::Boolean(condition) => condition, Type::Boolean)
-    }
-    pub fn expect_transformer(self) -> Result<Transformer> {
-        match_expect_type!(self, Value::Transformer(transformer) => transformer, Type::Transformer)
-    }
-}
-
-impl<R: RealNumberInternalTrait> Display for Value<R> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Value::Number(num) => write!(f, "{}", num),
-            Value::Symbol(symbol) => write!(f, "{}", symbol),
-            Value::Procedure(p) => write!(f, "{}", p),
-            Value::Void => write!(f, "Void"),
-            Value::Boolean(true) => write!(f, "#t"),
-            Value::Boolean(false) => write!(f, "#f"),
-            Value::Character(c) => write!(f, "#\\{}", c),
-            Value::String(ref s) => write!(f, "{}", s),
-            Value::Vector(vecref) => write!(f, "#({})", vecref),
-            Value::Pair(list) => write!(f, "{}", list),
-            Value::EmptyList => write!(f, "()"),
-            Value::Transformer(transformer) => write!(f, "{}", transformer),
-        }
-    }
-}
-
-// impl FromIterator ValueReference
-
-fn check_division_by_zero(num: i32) -> Result<()> {
-    match num {
-        0 => error!(LogicError::DivisionByZero),
-        _ => Ok(()),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Transformer {
     Native(fn(SmallVec<[Expression; 4]>) -> Result<Vec<Statement>>),
@@ -761,5 +669,118 @@ impl Transformer {
         match self {
             Transformer::Native(f) => f(expression_arguments.into_iter().collect()),
         }
+    }
+}
+
+// TODO: using enum as type when RFC 1450 is stable
+#[derive(Debug, PartialEq, Clone)]
+pub enum Type {
+    Number, // Non exhaustive, but ok
+    Integer,
+    Real,
+    Rational,
+    Boolean,
+    Character,
+    String,
+    Symbol,
+    Procedure,
+    Vector,
+    Pair,
+    EmptyList,
+    Void,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value<R: RealNumberInternalTrait> {
+    Number(Number<R>),
+    Boolean(bool),
+    Character(char),
+    String(String),
+    Symbol(String),
+    Procedure(Procedure<R>),
+    Vector(ValueReference<Vec<Value<R>>>),
+    Pair(Box<Pair<R>>),
+    Transformer(Transformer),
+    Void,
+}
+
+pub type Pair<R> = GenericPair<Value<R>>;
+
+impl<R: RealNumberInternalTrait> Pairable for Value<R> {
+    impl_pairable!(Value);
+}
+
+impl<R: RealNumberInternalTrait> From<Box<Pair<R>>> for Value<R> {
+    fn from(pair: Box<Pair<R>>) -> Self {
+        Value::Pair(pair)
+    }
+}
+
+impl<R: RealNumberInternalTrait> From<Pair<R>> for Value<R> {
+    fn from(pair: Pair<R>) -> Self {
+        Value::Pair(Box::new(pair))
+    }
+}
+
+impl<R: RealNumberInternalTrait> From<i32> for Value<R> {
+    fn from(integer: i32) -> Self {
+        Value::Number(Number::Integer(integer))
+    }
+}
+
+impl<R: RealNumberInternalTrait> Value<R> {
+    pub fn expect_number(self) -> Result<Number<R>> {
+        match_expect_type!(self, Value::Number(number) => number, Type::Number)
+    }
+    pub fn expect_integer(self) -> Result<i32> {
+        match_expect_type!(self, Value::Number(Number::Integer(i)) => i, Type::Number)
+    }
+    pub fn expect_real(self) -> Result<R> {
+        match_expect_type!(self, Value::Number(Number::Real(r)) => r, Type::Real)
+    }
+    pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R>>>> {
+        match_expect_type!(self, Value::Vector(vector) => vector, Type::Vector)
+    }
+    pub fn expect_list(self) -> Result<Pair<R>> {
+        match_expect_type!(self, Value::Pair(list) => *list, Type::Pair)
+    }
+    pub fn expect_string(self) -> Result<String> {
+        match_expect_type!(self, Value::String(string) => string, Type::String)
+    }
+    pub fn expect_symbol(self) -> Result<String> {
+        match_expect_type!(self, Value::Symbol(string) => string, Type::Symbol)
+    }
+    pub fn expect_procedure(self) -> Result<Procedure<R>> {
+        match_expect_type!(self, Value::Procedure(procedure) => procedure, Type::Procedure)
+    }
+    pub fn expect_boolean(self) -> Result<bool> {
+        match_expect_type!(self, Value::Boolean(condition) => condition, Type::Boolean)
+    }
+}
+
+impl<R: RealNumberInternalTrait> Display for Value<R> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Value::Number(num) => write!(f, "{}", num),
+            Value::Symbol(symbol) => write!(f, "{}", symbol),
+            Value::Procedure(p) => write!(f, "{}", p),
+            Value::Void => write!(f, "Void"),
+            Value::Boolean(true) => write!(f, "#t"),
+            Value::Boolean(false) => write!(f, "#f"),
+            Value::Character(c) => write!(f, "#\\{}", c),
+            Value::String(ref s) => write!(f, "{}", s),
+            Value::Vector(vecref) => write!(f, "#({})", vecref),
+            Value::Pair(list) => write!(f, "{}", list),
+            Value::Transformer(transformer) => write!(f, "{}", transformer),
+        }
+    }
+}
+
+// impl FromIterator ValueReference
+
+fn check_division_by_zero(num: i32) -> Result<()> {
+    match num {
+        0 => error!(LogicError::DivisionByZero),
+        _ => Ok(()),
     }
 }

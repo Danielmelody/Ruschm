@@ -1,6 +1,7 @@
 use crate::{
     interpreter::Result,
-    parser::ParameterFormals,
+    parser::pair::GenericPair,
+    parser::*,
     values::{Procedure, RealNumberInternalTrait, Value},
 };
 
@@ -14,8 +15,7 @@ fn display<R: RealNumberInternalTrait>(
 pub fn library_map<'a, R: RealNumberInternalTrait>() -> Vec<(String, Value<R>)> {
     vec![pure_function_mapping!(
         "display",
-        vec!["value".to_string()],
-        None,
+        param_fixed!["value"],
         display
     )]
 }

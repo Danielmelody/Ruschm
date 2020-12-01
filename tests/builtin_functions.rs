@@ -1,8 +1,9 @@
 use ruschm::{
     error::ToLocated,
     error::{ErrorData, SchemeError},
-    interpreter::{error::LogicError, pair::Pair, Interpreter},
+    interpreter::{error::LogicError, Interpreter},
     values::Number,
+    values::Pair,
     values::Type,
     values::Value,
 };
@@ -12,14 +13,25 @@ fn list() -> Result<(), SchemeError> {
     let mut interpreter = Interpreter::<f32>::new_with_stdlib();
     assert_eq!(
         interpreter.eval("(list 1 2 3)".chars())?,
-        Some(Value::Pair(Box::new(Pair::new(
+        Some(Value::Pair(Box::new(Pair::Some(
             Value::Number(Number::Integer(1)),
-            Value::Pair(Box::new(Pair::new(
+            Value::Pair(Box::new(Pair::Some(
                 Value::Number(Number::Integer(2)),
-                Value::Pair(Box::new(Pair::new(
+                Value::Pair(Box::new(Pair::Some(
                     Value::Number(Number::Integer(3)),
-                    Value::EmptyList
+                    Value::Pair(Box::new(Pair::Empty))
                 )))
+            )))
+        ))))
+    );
+
+    assert_eq!(
+        interpreter.eval("'(1 2 . 3)".chars())?,
+        Some(Value::Pair(Box::new(Pair::Some(
+            Value::Number(Number::Integer(1)),
+            Value::Pair(Box::new(Pair::Some(
+                Value::Number(Number::Integer(2)),
+                Value::Number(Number::Integer(3))
             )))
         ))))
     );
