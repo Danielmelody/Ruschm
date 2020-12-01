@@ -1,3 +1,4 @@
+use either::Either;
 use std::{
     cell::RefCell,
     cell::RefMut,
@@ -15,10 +16,9 @@ use crate::{
     environment::*,
     error::*,
     interpreter::error::LogicError,
-    interpreter::pair::Pair,
-    parser::Expression,
+    parser::pair::{GenericPair, Pairable},
     parser::ParameterFormals,
-    parser::{SchemeProcedure, Statement},
+    parser::SchemeProcedure,
 };
 
 type Result<T> = std::result::Result<T, SchemeError>;
@@ -646,7 +646,6 @@ pub enum Type {
     Pair,
     EmptyList,
     Void,
-    Transformer,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -659,9 +658,31 @@ pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Procedure(Procedure<R, E>),
     Vector(ValueReference<Vec<Value<R, E>>>),
     Pair(Box<Pair<R, E>>),
-    EmptyList,
     Void,
-    Transformer(Transformer),
+}
+
+pub type Pair<R, E> = GenericPair<Value<R, E>>;
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Pairable for Value<R, E> {
+    impl_pairable!(Value);
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> From<Box<Pair<R, E>>> for Value<R, E> {
+    fn from(pair: Box<Pair<R, E>>) -> Self {
+        Value::Pair(pair)
+    }
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> From<Pair<R, E>> for Value<R, E> {
+    fn from(pair: Pair<R, E>) -> Self {
+        Value::Pair(Box::new(pair))
+    }
+}
+
+impl<R: RealNumberInternalTrait, E: IEnvironment<R>> From<i32> for Value<R, E> {
+    fn from(integer: i32) -> Self {
+        Value::Number(Number::Integer(integer))
+    }
 }
 
 impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
@@ -677,7 +698,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R, E>>>> {
         match_expect_type!(self, Value::Vector(vector) => vector, Type::Vector)
     }
-    pub fn expect_list_or_pair(self) -> Result<Pair<R, E>> {
+    pub fn expect_list(self) -> Result<Pair<R, E>> {
         match_expect_type!(self, Value::Pair(list) => *list, Type::Pair)
     }
     pub fn expect_string(self) -> Result<String> {
@@ -691,9 +712,6 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     }
     pub fn expect_boolean(self) -> Result<bool> {
         match_expect_type!(self, Value::Boolean(condition) => condition, Type::Boolean)
-    }
-    pub fn expect_transformer(self) -> Result<Transformer> {
-        match_expect_type!(self, Value::Transformer(transformer) => transformer, Type::Transformer)
     }
 }
 
@@ -710,8 +728,6 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Value<R, E> {
             Value::String(ref s) => write!(f, "{}", s),
             Value::Vector(vecref) => write!(f, "#({})", vecref),
             Value::Pair(list) => write!(f, "{}", list),
-            Value::EmptyList => write!(f, "()"),
-            Value::Transformer(transformer) => write!(f, "{}", transformer),
         }
     }
 }
@@ -720,29 +736,5 @@ fn check_division_by_zero(num: i32) -> Result<()> {
     match num {
         0 => error!(LogicError::DivisionByZero),
         _ => Ok(()),
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Transformer {
-    Native(fn(SmallVec<[Expression; 4]>) -> Result<Vec<Statement>>),
-}
-
-impl Display for Transformer {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Transformer::Native(_) => write!(f, "<build-in transformer>"),
-        }
-    }
-}
-
-impl Transformer {
-    pub fn transform(
-        &self,
-        expression_arguments: impl IntoIterator<Item = Expression>,
-    ) -> Result<Vec<Statement>> {
-        match self {
-            Transformer::Native(f) => f(expression_arguments.into_iter().collect()),
-        }
     }
 }

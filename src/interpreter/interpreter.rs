@@ -1,24 +1,29 @@
 #![allow(dead_code)]
 
-#[cfg(test)]
-use crate::values::{Transformer, Type};
-use crate::{
-    environment::*, library_name, values::BuiltinProcedure, values::Number,
-    values::RealNumberInternalTrait, values::ValueReference,
-};
-use crate::{error::*, values::Value};
-use crate::{file::file_char_stream, values::ArgVec};
-use crate::{parser::*, values::Procedure};
+use crate::parser::*;
 use error::SyntaxError;
+use itertools::Itertools;
+
+use crate::error::*;
+use crate::values::Procedure;
+use crate::{environment::*, library_name, values::*};
+use crate::{
+    io::file_char_stream,
+    values::{ArgVec, Type},
+};
+
+#[cfg(test)]
+use crate::parser::pair::*;
 
 use std::{collections::HashMap, ops::Deref, path::Path, rc::Rc};
 use std::{collections::HashSet, iter::Iterator};
 use std::{marker::PhantomData, path::PathBuf};
 
-use super::library::LibraryName;
-use super::library::{native, Library};
 use super::Result;
-use super::{error::LogicError, pair::Pair};
+use super::{error::LogicError, library::native};
+use crate::interpreter::library::Library;
+use crate::parser::LibraryName;
+
 pub enum LibraryFactory<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Native(LibraryName, fn() -> Vec<(String, Value<R, E>)>),
     AST(Located<LibraryDefinition>),
@@ -65,7 +70,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryFactory<R, E> {
         let parser = Parser::from_lexer(lexer);
         for statement in parser {
             if let Statement::LibraryDefinition(library_definition) = statement? {
-                if library_definition.0.deref() == expect_library_name {
+                if library_definition.0 == *expect_library_name {
                     return Ok(Self::AST(library_definition));
                 }
             }
@@ -76,7 +81,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryFactory<R, E> {
 
 #[derive(Debug, Clone, PartialEq)]
 enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    TailCall(TailCall<'a, R, E>),
+    TailCall(&'a Expression, &'a [Expression], Rc<E>),
     Value(Value<R, E>),
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -117,7 +122,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryLoader<R, E> {
     /// ```
     /// use ruschm::library_name;
     /// use ruschm::environment::StandardEnv;
-    /// use ruschm::interpreter::{LibraryLoader, LibraryFactory, library::LibraryName};
+    /// use ruschm::interpreter::{LibraryLoader, LibraryFactory};
+    /// use ruschm::parser::LibraryName;
     /// use std::collections::HashSet;
     /// let library_loader = LibraryLoader::<f32, StandardEnv<_>>::new()
     ///     .with_lib_factory(LibraryFactory::Native(library_name!("foo"), || vec![]))
@@ -144,7 +150,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryLoader<R, E> {
 
 pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     pub env: Rc<E>,
-    lib_loader: LibraryLoader<R, E>,
+    lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R, E>>>,
     imported_library: HashSet<LibraryName>,
     import_end: bool, // indicate program's import declaration part end
     pub program_directory: Option<PathBuf>,
@@ -155,7 +161,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn new() -> Self {
         let mut interpreter = Self {
             env: Rc::new(E::new()),
-            lib_loader: LibraryLoader::new(),
+            lib_factories: HashMap::new(),
             imported_library: HashSet::new(),
             import_end: false,
             program_directory: None,
@@ -172,13 +178,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         interpreter
     }
 
-    pub fn append_lib_loader(&mut self, lib_loader: LibraryLoader<R, E>) {
-        self.lib_loader
-            .lib_factories
-            .extend(lib_loader.lib_factories.into_iter());
-    }
     pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R, E>) {
-        self.lib_loader.register_library_factory(library_factory);
+        self.lib_factories.insert(
+            library_factory.get_library_name().clone(),
+            Rc::new(library_factory),
+        );
     }
 
     fn register_stdlib_factories(&mut self) {
@@ -215,13 +219,20 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     ) -> Result<TailExpressionResult<'a, R, E>> {
         let local_env = Rc::new(E::new_child(closure.clone()));
         let mut arg_iter = args.into_iter();
-        for (param, arg) in formals.0.iter().zip(arg_iter.by_ref()) {
-            local_env.define(param.clone(), arg);
+        match formals.iter_to_last(|formal| {
+            let arg = arg_iter.next().unwrap();
+            local_env.define(formal.as_name(), arg);
+        }) {
+            Some(variadic) => {
+                let list = arg_iter.collect::<Pair<R, E>>();
+                local_env.define(variadic.as_name(), Value::Pair(Box::new(list)));
+            }
+            None => {}
         }
-        if let Some(variadic) = &formals.1 {
-            let list = arg_iter.rev().collect();
-            local_env.define(variadic.clone(), list);
-        }
+        // if let Some(variadic) = &formals.1 {
+        //     let list = arg_iter.collect();
+        //     local_env.define(variadic.clone(), Value::Pair(list));
+        // }
         for DefinitionBody(name, expr) in internal_definitions.into_iter().map(|d| &d.data) {
             let value = Self::eval_expression(&expr, &local_env)?;
             local_env.define(name.clone(), value)
@@ -260,8 +271,14 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         env: &Rc<E>,
     ) -> Result<Value<R, E>> {
         let formals = initial_procedure.get_parameters();
-        if args.len() < formals.0.len() || (args.len() > formals.0.len() && formals.1.is_none()) {
-            return error!(LogicError::ArgumentMissMatch(formals.clone(), args.len()));
+        // let args = args.into_iter();
+        // formals.iter_to_last(|formal| args.next)
+        let (fixed_len, has_variadic) = formals.len();
+        if args.len() < fixed_len || (args.len() > fixed_len && !has_variadic) {
+            return error!(LogicError::ArgumentMissMatch(
+                formals.clone(),
+                format!("{}", args.iter().join(" "))
+            ));
         }
         let mut current_procedure = None;
         loop {
@@ -282,9 +299,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                         args,
                     )?;
                     match apply_result {
-                        TailExpressionResult::TailCall(tail_call) => {
-                            let (tail_procedure_expr, tail_arguments, last_env) =
-                                tail_call.as_ref();
+                        TailExpressionResult::TailCall(
+                            tail_procedure_expr,
+                            tail_arguments,
+                            last_env,
+                        ) => {
                             let (tail_procedure, tail_args) = Self::eval_procedure_call(
                                 tail_procedure_expr,
                                 tail_arguments,
@@ -308,17 +327,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     ) -> Result<TailExpressionResult<'a, R, E>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
-                if let Some(expanded) =
-                    Self::try_expand_expression(procedure_expr, arguments, &env)?
-                {
-                    Self::eval_owned_tail_expression(expanded, env)?
-                } else {
-                    TailExpressionResult::TailCall(TailCall::Ref(
-                        procedure_expr.as_ref(),
-                        arguments,
-                        env,
-                    ))
-                }
+                TailExpressionResult::TailCall(procedure_expr.as_ref(), arguments, env)
             }
             ExpressionBody::Conditional(cond) => {
                 let (test, consequent, alternative) = cond.as_ref();
@@ -335,91 +344,19 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             _ => TailExpressionResult::Value(Self::eval_expression(&expression, &env)?),
         })
     }
-    // during eval_tail_expression, some expression will expand to owned expression
-    // it has to repeat this logic for owned expression, no other workaround
-    fn eval_owned_tail_expression<'a>(
-        expression: Expression,
-        env: Rc<E>,
-    ) -> Result<TailExpressionResult<'a, R, E>> {
-        Ok(match &expression.data {
-            ExpressionBody::ProcedureCall(..) | ExpressionBody::Conditional(_) => {
-                match expression.extract_data() {
-                    ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
-                        if let Some(expanded) =
-                            Self::try_expand_expression(procedure_expr.as_ref(), &arguments, &env)?
-                        {
-                            Self::eval_owned_tail_expression(expanded, env)?
-                        } else {
-                            TailExpressionResult::TailCall(TailCall::Owned(
-                                *procedure_expr,
-                                arguments,
-                                env,
-                                PhantomData,
-                            ))
-                        }
-                    }
-                    ExpressionBody::Conditional(cond) => {
-                        let (test, consequent, alternative) = *cond;
-                        let condition = Self::eval_expression(&test, &env)?.expect_boolean()?;
-                        if condition {
-                            Self::eval_owned_tail_expression(consequent, env)?
-                        } else {
-                            match alternative {
-                                Some(alter) => Self::eval_owned_tail_expression(alter, env)?,
-                                None => TailExpressionResult::Value(Value::Void),
-                            }
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            _ => TailExpressionResult::Value(Self::eval_expression(&expression, &env)?),
-        })
-    }
 
-    pub fn read_literal(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
-        match &expression.data {
-            ExpressionBody::Primitive(primitive) => Self::eval_primitive(primitive),
-            ExpressionBody::Identifier(name) => Ok(Value::Symbol(name.clone())),
-            ExpressionBody::List(list) => {
-                let last_second = list.iter().rev().skip(1).next();
-                match last_second {
-                    Some(Expression {
-                        data: ExpressionBody::Period,
-                        location,
-                    }) => match list.iter().rev().skip(2).next() {
-                        Some(_) => {
-                            let mut car = list.iter().rev().skip(2);
-                            car.try_fold(
-                                Self::read_literal(list.last().unwrap(), env)?,
-                                |pair, current| {
-                                    Ok(Value::Pair(Box::new(Pair {
-                                        car: Self::read_literal(current, env)?,
-                                        cdr: pair,
-                                    })))
-                                },
-                            )
-                        }
-                        None => {
-                            return Err(ErrorData::Logic(LogicError::MetaCircularSyntax(
-                                SyntaxError::UnexpectedToken(TokenData::Period),
-                            ))
-                            .locate(*location))
-                        }
-                    },
-                    _ => Ok(list
-                        .iter()
-                        .rev()
-                        .map(|i| Self::read_literal(i, env))
-                        .collect::<Result<_>>()?),
-                }
-            }
-            ExpressionBody::Vector(vec) => Ok(Value::Vector(ValueReference::new_immutable(
-                vec.iter()
+    pub fn read_literal(datum: &Datum, env: &Rc<E>) -> Result<Value<R, E>> {
+        match &datum.data {
+            DatumBody::Primitive(primitive) => Self::eval_primitive(&primitive),
+            DatumBody::Symbol(name) => Ok(Value::Symbol(name.clone())),
+            DatumBody::Pair(list) => Ok(Value::Pair(Box::new(
+                list.map_ok_ref(&mut |i| Self::read_literal(i, env))?,
+            ))),
+            DatumBody::Vector(vec) => Ok(Value::Vector(ValueReference::new_immutable(
+                vec.into_iter()
                     .map(|i| Self::read_literal(i, env))
                     .collect::<Result<_>>()?,
             ))),
-            o => unreachable!("expression should not be {:?}", o),
         }
     }
 
@@ -436,56 +373,27 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             Primitive::Rational(a, b) => Value::Number(Number::Rational(*a, *b as i32)),
         })
     }
-    fn try_expand_expression(
-        procedure_expr: &Expression,
-        arguments: &[Expression],
-        env: &Rc<E>,
-    ) -> Result<Option<Expression>> {
-        Ok(
-            if let Value::Transformer(transformer) = Self::eval_expression(procedure_expr, env)? {
-                Some({
-                    let location = procedure_expr.location;
-                    let mut transformed = transformer
-                        .transform(arguments.iter().cloned().collect::<Vec<_>>())?
-                        .into_iter();
-                    let expression = if let Some(statement) = transformed.next() {
-                        statement.expect_expression()?
-                    } else {
-                        return located_error!(
-                            SyntaxError::ExpectSomething("expression".to_string()),
-                            location
-                        );
-                    };
 
-                    if transformed.next().is_some() {
-                        panic!("transformer expand to multiple statements unsupported")
-                    }
-                    expression
-                })
-            } else {
-                None
-            },
-        )
-    }
     pub fn eval_expression(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
         Ok(match &expression.data {
             ExpressionBody::Primitive(datum) => Self::eval_primitive(datum)?,
-            ExpressionBody::List(_) => {
-                unreachable!("expression list should be converted to list value")
-            }
-            ExpressionBody::Vector(_) => Self::read_literal(&expression, env)?,
+            ExpressionBody::Datum(datum) => Self::read_literal(datum, env)?,
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
-                if let Some(expanded) = Self::try_expand_expression(procedure_expr, arguments, env)?
-                {
-                    Self::eval_expression(&expanded, env)?
-                } else {
-                    let procedure =
-                        Self::eval_expression(procedure_expr, env)?.expect_procedure()?;
-                    let evaluated_args: Result<ArgVec<_, _>> = arguments
-                        .into_iter()
-                        .map(|arg| Self::eval_expression(arg, env))
-                        .collect();
-                    Self::apply_procedure(&procedure, evaluated_args?, env)?
+                let first = Self::eval_expression(procedure_expr, env)?;
+                let evaluated_args: Result<ArgVec<_, _>> = arguments
+                    .into_iter()
+                    .map(|arg| Self::eval_expression(arg, env))
+                    .collect();
+                match first {
+                    Value::Procedure(procedure) => {
+                        Self::apply_procedure(&procedure, evaluated_args?, env)?
+                    }
+                    other => {
+                        return located_error!(
+                            LogicError::TypeMisMatch(other.to_string(), Type::Procedure),
+                            procedure_expr.location
+                        )
+                    }
                 }
             }
             ExpressionBody::Period => {
@@ -515,7 +423,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             }
             ExpressionBody::Quote(inner) => Self::read_literal(inner.as_ref(), env)?,
 
-            ExpressionBody::Identifier(ident) => match env.get(ident.as_str()) {
+            ExpressionBody::Symbol(ident) => match env.get(ident.as_str()) {
                 Some(value) => value.clone(),
                 None => {
                     return located_error!(
@@ -566,12 +474,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
     pub fn get_library(&mut self, name: Located<LibraryName>) -> Result<Library<R, E>> {
-        let factory = match self.lib_loader.lib_factories.get(&name) {
+        let factory = match self.lib_factories.get(&name) {
             Some(factory) => factory,
             None => {
                 let new_factory = self.file_library_factory(&name)?;
-                self.lib_loader
-                    .lib_factories
+                self.lib_factories
                     .entry(name.deref().clone())
                     .or_insert(Rc::new(new_factory))
             }
@@ -637,7 +544,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
 
-    pub fn eval_expression_statement_or_definition(
+    pub fn eval_expression_or_definition(
         &mut self,
         statement: &Statement,
         env: Rc<E>,
@@ -654,7 +561,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             }
             Statement::SyntaxDefinition(_) => todo!("defining new syntax is not supported"),
             _ => error!(SyntaxError::ExpectSomething(
-                "expression/definition".to_string()
+                "expression/definition".to_string(),
+                "other statement".to_string(),
             ))?,
         })
     }
@@ -669,18 +577,19 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 Statement::LibraryDefinition(library_definition) => {
                     return located_error!(
                         SyntaxError::ExpectSomething(
-                            "import declaration/expression/definition".to_string()
+                            "import declaration/expression/definition".to_string(),
+                            "other statement".to_string(),
                         ),
                         library_definition.location.clone()
                     );
                 }
                 other => {
                     self.import_end = true;
-                    self.eval_expression_statement_or_definition(other, env)?
+                    self.eval_expression_or_definition(other, env)?
                 }
             })
         } else {
-            self.eval_expression_statement_or_definition(ast, env)
+            self.eval_expression_or_definition(ast, env)
         }
     }
 
@@ -704,7 +613,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 LibraryDeclaration::Export(exports) => final_exports.extend(exports.iter()),
                 LibraryDeclaration::Begin(statements) => {
                     for statement in statements.iter() {
-                        self.eval_expression_statement_or_definition(statement, lib_env.clone())?;
+                        self.eval_expression_or_definition(statement, lib_env.clone())?;
                     }
                 }
             }
@@ -772,9 +681,7 @@ fn arithmetic() -> Result<()> {
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "+".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
             vec![
                 ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                 ExpressionBody::Primitive(Primitive::Integer(2)).into()
@@ -785,9 +692,7 @@ fn arithmetic() -> Result<()> {
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "+".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
             vec![
                 ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                 ExpressionBody::Primitive(Primitive::Rational(1, 2)).into()
@@ -798,9 +703,7 @@ fn arithmetic() -> Result<()> {
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "*".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("*".to_string()))),
             vec![
                 ExpressionBody::Primitive(Primitive::Rational(1, 2)).into(),
                 ExpressionBody::Primitive(Primitive::Real("2.0".to_string()).into()).into(),
@@ -811,9 +714,7 @@ fn arithmetic() -> Result<()> {
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "/".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("/".to_string()))),
             vec![
                 ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                 ExpressionBody::Primitive(Primitive::Integer(0)).into()
@@ -824,9 +725,7 @@ fn arithmetic() -> Result<()> {
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "max".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("max".to_string()))),
             vec![
                 ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                 ExpressionBody::Primitive(Primitive::Real("1.3".to_string()).into()).into(),
@@ -836,9 +735,7 @@ fn arithmetic() -> Result<()> {
     );
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "min".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("min".to_string()))),
             vec![
                 ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                 ExpressionBody::Primitive(Primitive::Real("1.3".to_string()).into()).into(),
@@ -848,9 +745,7 @@ fn arithmetic() -> Result<()> {
     );
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "min".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("min".to_string()))),
             vec![ExpressionBody::Primitive(Primitive::String("a".to_string()).into()).into()]
         ))),
         Err(ErrorData::Logic(LogicError::TypeMisMatch("a".to_string(), Type::Number)).no_locate()),
@@ -858,9 +753,7 @@ fn arithmetic() -> Result<()> {
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "max".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("max".to_string()))),
             vec![ExpressionBody::Primitive(Primitive::String("a".to_string()).into()).into()]
         ))),
         Err(ErrorData::Logic(LogicError::TypeMisMatch("a".to_string(), Type::Number)).no_locate()),
@@ -868,18 +761,14 @@ fn arithmetic() -> Result<()> {
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "sqrt".to_string()
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("sqrt".to_string()))),
             vec![ExpressionBody::Primitive(Primitive::Integer(4)).into()]
         )))?,
         Value::Number(Number::Real(2.0)),
     );
 
     match interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-        Box::new(Expression::from(ExpressionBody::Identifier(
-            "sqrt".to_string(),
-        ))),
+        Box::new(Expression::from(ExpressionBody::Symbol("sqrt".to_string()))),
         vec![ExpressionBody::Primitive(Primitive::Integer(-4)).into()],
     )))? {
         Value::Number(Number::Real(should_be_nan)) => {
@@ -894,9 +783,7 @@ fn arithmetic() -> Result<()> {
     {
         assert_eq!(
             interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from(ExpressionBody::Identifier(
-                    cmp.to_string()
-                ))),
+                Box::new(Expression::from(ExpressionBody::Symbol(cmp.to_string()))),
                 vec![
                     ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                     ExpressionBody::Primitive(Primitive::Rational(1, 1)).into(),
@@ -915,9 +802,8 @@ fn undefined() -> Result<()> {
     let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
 
     assert_eq!(
-        interpreter.eval_root_expression(Expression::from(ExpressionBody::Identifier(
-            "foo".to_string()
-        ))),
+        interpreter
+            .eval_root_expression(Expression::from(ExpressionBody::Symbol("foo".to_string()))),
         Err(ErrorData::Logic(LogicError::UnboundedSymbol("foo".to_string())).no_locate())
     );
     Ok(())
@@ -934,11 +820,9 @@ fn variable_definition() -> Result<()> {
         ))),
         Statement::Definition(Definition::from(DefinitionBody(
             "b".to_string(),
-            Expression::from(ExpressionBody::Identifier("a".to_string())),
+            Expression::from(ExpressionBody::Symbol("a".to_string())),
         ))),
-        Statement::Expression(Expression::from(ExpressionBody::Identifier(
-            "b".to_string(),
-        ))),
+        Statement::Expression(Expression::from(ExpressionBody::Symbol("b".to_string()))),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
@@ -960,9 +844,7 @@ fn variable_assignment() -> Result<()> {
             "a".to_string(),
             Box::new(ExpressionBody::Primitive(Primitive::Integer(2)).into()),
         ))),
-        Statement::Expression(Expression::from(ExpressionBody::Identifier(
-            "a".to_string(),
-        ))),
+        Statement::Expression(Expression::from(ExpressionBody::Symbol("a".to_string()))),
     ];
     assert_eq!(
         interpreter.eval_program(program.iter())?,
@@ -979,13 +861,13 @@ fn builtin_procedural() -> Result<()> {
         Statement::Definition(Definition::from(DefinitionBody(
             "get-add".to_string(),
             simple_procedure(
-                ParameterFormals::new(),
-                Expression::from(ExpressionBody::Identifier("+".to_string())),
+                param_fixed![],
+                Expression::from(ExpressionBody::Symbol("+".to_string())),
             ),
         ))),
         Statement::Expression(Expression::from(ExpressionBody::ProcedureCall(
             Box::new(Expression::from(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from(ExpressionBody::Identifier(
+                Box::new(Expression::from(ExpressionBody::Symbol(
                     "get-add".to_string(),
                 ))),
                 vec![],
@@ -1011,22 +893,18 @@ fn procedure_definition() -> Result<()> {
         Statement::Definition(Definition::from(DefinitionBody(
             "add".to_string(),
             simple_procedure(
-                ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
+                param_fixed!["x", "y"],
                 Expression::from(ExpressionBody::ProcedureCall(
-                    Box::new(Expression::from(ExpressionBody::Identifier(
-                        "+".to_string(),
-                    ))),
+                    Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                     vec![
-                        Expression::from(ExpressionBody::Identifier("x".to_string())),
-                        Expression::from(ExpressionBody::Identifier("y".to_string())),
+                        Expression::from(ExpressionBody::Symbol("x".to_string())),
+                        Expression::from(ExpressionBody::Symbol("y".to_string())),
                     ],
                 )),
             ),
         ))),
         Statement::Expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "add".to_string(),
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("add".to_string()))),
             vec![
                 ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                 ExpressionBody::Primitive(Primitive::Integer(2)).into(),
@@ -1045,14 +923,12 @@ fn procedure_debug() -> Result<()> {
     let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
 
     let program = vec![Statement::Expression(simple_procedure(
-        ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
+        param_fixed!["x".to_string(), "y".to_string()],
         Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "+".to_string(),
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
             vec![
-                Expression::from(ExpressionBody::Identifier("x".to_string())),
-                Expression::from(ExpressionBody::Identifier("y".to_string())),
+                Expression::from(ExpressionBody::Symbol("x".to_string())),
+                Expression::from(ExpressionBody::Symbol("y".to_string())),
             ],
         )),
     ))];
@@ -1068,17 +944,12 @@ fn lambda_call() -> Result<()> {
     let program = vec![Statement::Expression(Expression::from(
         ExpressionBody::ProcedureCall(
             Box::new(simple_procedure(
-                ParameterFormals(
-                    vec!["x".to_string(), "y".to_string()],
-                    Some("z".to_string()),
-                ),
+                append_param!(param_fixed!["x", "y"], "z"),
                 Expression::from(ExpressionBody::ProcedureCall(
-                    Box::new(Expression::from(ExpressionBody::Identifier(
-                        "+".to_string(),
-                    ))),
+                    Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                     vec![
-                        Expression::from(ExpressionBody::Identifier("x".to_string())),
-                        Expression::from(ExpressionBody::Identifier("y".to_string())),
+                        Expression::from(ExpressionBody::Symbol("x".to_string())),
+                        Expression::from(ExpressionBody::Symbol("y".to_string())),
                     ],
                 )),
             )),
@@ -1105,31 +976,31 @@ fn closure() -> Result<()> {
         Statement::Definition(Definition::from(DefinitionBody(
             "counter-creator".to_string(),
             Expression::from(ExpressionBody::Procedure(SchemeProcedure(
-                ParameterFormals::new(),
+                param_fixed![],
                 vec![Definition::from(DefinitionBody(
                     "current".to_string(),
                     ExpressionBody::Primitive(Primitive::Integer(0)).into(),
                 ))],
                 vec![Expression::from(ExpressionBody::Procedure(
                     SchemeProcedure(
-                        ParameterFormals::new(),
+                        param_fixed![],
                         vec![],
                         vec![
                             Expression::from(ExpressionBody::Assignment(
                                 "current".to_string(),
                                 Box::new(Expression::from(ExpressionBody::ProcedureCall(
-                                    Box::new(Expression::from(ExpressionBody::Identifier(
+                                    Box::new(Expression::from(ExpressionBody::Symbol(
                                         "+".to_string(),
                                     ))),
                                     vec![
-                                        Expression::from(ExpressionBody::Identifier(
+                                        Expression::from(ExpressionBody::Symbol(
                                             "current".to_string(),
                                         )),
                                         ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                                     ],
                                 ))),
                             )),
-                            Expression::from(ExpressionBody::Identifier("current".to_string())),
+                            Expression::from(ExpressionBody::Symbol("current".to_string())),
                         ],
                     ),
                 ))],
@@ -1138,20 +1009,20 @@ fn closure() -> Result<()> {
         Statement::Definition(Definition::from(DefinitionBody(
             "counter".to_string(),
             Expression::from(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from(ExpressionBody::Identifier(
+                Box::new(Expression::from(ExpressionBody::Symbol(
                     "counter-creator".to_string(),
                 ))),
                 vec![],
             )),
         ))),
         Statement::Expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
+            Box::new(Expression::from(ExpressionBody::Symbol(
                 "counter".to_string(),
             ))),
             vec![],
         ))),
         Statement::Expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
+            Box::new(Expression::from(ExpressionBody::Symbol(
                 "counter".to_string(),
             ))),
             vec![],
@@ -1204,14 +1075,12 @@ fn local_environment() -> Result<()> {
         Statement::Definition(Definition::from(DefinitionBody(
             "adda".to_string(),
             simple_procedure(
-                ParameterFormals(vec!["x".to_string()], None),
+                param_fixed![ParameterFormals::Name("x".to_string())],
                 Expression::from(ExpressionBody::ProcedureCall(
-                    Box::new(Expression::from(ExpressionBody::Identifier(
-                        "+".to_string(),
-                    ))),
+                    Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                     vec![
-                        Expression::from(ExpressionBody::Identifier("x".to_string())),
-                        Expression::from(ExpressionBody::Identifier("a".to_string())),
+                        Expression::from(ExpressionBody::Symbol("x".to_string())),
+                        Expression::from(ExpressionBody::Symbol("a".to_string())),
                     ],
                 )),
             ),
@@ -1221,9 +1090,7 @@ fn local_environment() -> Result<()> {
             ExpressionBody::Primitive(Primitive::Integer(1)).into(),
         ))),
         Statement::Expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "adda".to_string(),
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("adda".to_string()))),
             vec![ExpressionBody::Primitive(Primitive::Integer(2)).into()],
         ))),
     ];
@@ -1242,14 +1109,12 @@ fn procedure_as_data() -> Result<()> {
         Statement::Definition(Definition::from(DefinitionBody(
             "add".to_string(),
             simple_procedure(
-                ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
+                param_fixed!["x", "y"],
                 Expression::from(ExpressionBody::ProcedureCall(
-                    Box::new(Expression::from(ExpressionBody::Identifier(
-                        "+".to_string(),
-                    ))),
+                    Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                     vec![
-                        Expression::from(ExpressionBody::Identifier("x".to_string())),
-                        Expression::from(ExpressionBody::Identifier("y".to_string())),
+                        Expression::from(ExpressionBody::Symbol("x".to_string())),
+                        Expression::from(ExpressionBody::Symbol("y".to_string())),
                     ],
                 )),
             ),
@@ -1257,27 +1122,22 @@ fn procedure_as_data() -> Result<()> {
         Statement::Definition(Definition::from(DefinitionBody(
             "apply-op".to_string(),
             simple_procedure(
-                ParameterFormals(
-                    vec!["op".to_string(), "x".to_string(), "y".to_string()],
-                    None,
-                ),
+                param_fixed!["op", "x", "y"],
                 Expression::from(ExpressionBody::ProcedureCall(
-                    Box::new(Expression::from(ExpressionBody::Identifier(
-                        "op".to_string(),
-                    ))),
+                    Box::new(Expression::from(ExpressionBody::Symbol("op".to_string()))),
                     vec![
-                        Expression::from(ExpressionBody::Identifier("x".to_string())),
-                        Expression::from(ExpressionBody::Identifier("y".to_string())),
+                        Expression::from(ExpressionBody::Symbol("x".to_string())),
+                        Expression::from(ExpressionBody::Symbol("y".to_string())),
                     ],
                 )),
             ),
         ))),
         Statement::Expression(Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
+            Box::new(Expression::from(ExpressionBody::Symbol(
                 "apply-op".to_string(),
             ))),
             vec![
-                Expression::from(ExpressionBody::Identifier("add".to_string())),
+                Expression::from(ExpressionBody::Symbol("add".to_string())),
                 ExpressionBody::Primitive(Primitive::Integer(1)).into(),
                 ExpressionBody::Primitive(Primitive::Integer(2)).into(),
             ],
@@ -1307,47 +1167,41 @@ fn eval_tail_expression() -> Result<()> {
     }
     {
         let expression = Expression::from(ExpressionBody::ProcedureCall(
-            Box::new(Expression::from(ExpressionBody::Identifier(
-                "+".to_string(),
-            ))),
+            Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
             expect_result.clone(),
         ));
         assert_eq!(
             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(TailCall::Ref(
-                &Expression::from(ExpressionBody::Identifier("+".to_string())),
+            TailExpressionResult::TailCall(
+                &Expression::from(ExpressionBody::Symbol("+".to_string())),
                 &expect_result,
                 interpreter.env.clone()
-            ))
+            )
         );
     }
     {
         let expression = Expression::from(ExpressionBody::Conditional(Box::new((
             ExpressionBody::Primitive(Primitive::Boolean(true)).into(),
             Expression::from(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from(ExpressionBody::Identifier(
-                    "+".to_string(),
-                ))),
+                Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                 expect_result.clone(),
             )),
             None,
         ))));
         assert_eq!(
             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(TailCall::Ref(
-                &Expression::from(ExpressionBody::Identifier("+".to_string())),
+            TailExpressionResult::TailCall(
+                &Expression::from(ExpressionBody::Symbol("+".to_string())),
                 &expect_result,
                 interpreter.env.clone()
-            ))
+            )
         );
     }
     {
         let expression = Expression::from(ExpressionBody::Conditional(Box::new((
             ExpressionBody::Primitive(Primitive::Boolean(false)).into(),
             Expression::from(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from(ExpressionBody::Identifier(
-                    "+".to_string(),
-                ))),
+                Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                 expect_result.clone(),
             )),
             Some(ExpressionBody::Primitive(Primitive::Integer(4)).into()),
@@ -1362,19 +1216,17 @@ fn eval_tail_expression() -> Result<()> {
             ExpressionBody::Primitive(Primitive::Boolean(false)).into(),
             ExpressionBody::Primitive(Primitive::Integer(4)).into(),
             Some(Expression::from(ExpressionBody::ProcedureCall(
-                Box::new(Expression::from(ExpressionBody::Identifier(
-                    "+".to_string(),
-                ))),
+                Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                 expect_result.clone(),
             ))),
         ))));
         assert_eq!(
             Interpreter::eval_tail_expression(&expression, interpreter.env.clone())?,
-            TailExpressionResult::TailCall(TailCall::Ref(
-                &Expression::from(ExpressionBody::Identifier("+".to_string())),
+            TailExpressionResult::TailCall(
+                &Expression::from(ExpressionBody::Symbol("+".to_string())),
                 &expect_result,
                 interpreter.env.clone()
-            ))
+            )
         );
     }
     Ok(())
@@ -1386,18 +1238,15 @@ fn datum_literal() -> Result<()> {
 
     assert_eq!(
         Interpreter::eval_expression(
-            &ExpressionBody::Quote(Box::new(
-                ExpressionBody::Primitive(Primitive::Integer(1,)).into()
-            ))
-            .into(),
+            &ExpressionBody::Quote(Box::new(DatumBody::Primitive(Primitive::Integer(1)).into()))
+                .into(),
             &interpreter.env,
         )?,
-        Value::Number(Number::Integer(1))
+        1.into()
     );
     assert_eq!(
         Interpreter::eval_expression(
-            &ExpressionBody::Quote(Box::new(ExpressionBody::Identifier("a".to_string()).into()))
-                .into(),
+            &ExpressionBody::Quote(Box::new(DatumBody::Symbol("a".to_string()).into())).into(),
             &interpreter.env,
         )?,
         Value::Symbol("a".to_string())
@@ -1405,10 +1254,10 @@ fn datum_literal() -> Result<()> {
     assert_eq!(
         Interpreter::eval_expression(
             &ExpressionBody::Quote(
-                Box::<Expression>::new(
-                    ExpressionBody::List(vec![
-                        ExpressionBody::Primitive(Primitive::Integer(1)).into()
-                    ])
+                Box::<Datum>::new(
+                    DatumBody::Pair(Box::new(list![
+                        DatumBody::Primitive(Primitive::Integer(1)).into()
+                    ]))
                     .into()
                 )
                 .into()
@@ -1416,19 +1265,17 @@ fn datum_literal() -> Result<()> {
             .into(),
             &interpreter.env,
         )?,
-        Value::Pair(Box::new(Pair {
-            car: Value::Number(Number::Integer(1)),
-            cdr: Value::EmptyList
-        }))
+        Box::new(Pair::Some(
+            Value::Number(Number::Integer(1)),
+            Value::from(Box::new(Pair::Empty))
+        ))
+        .into()
     );
     assert_eq!(
         Interpreter::eval_expression(
             &ExpressionBody::Quote(
-                Box::<Expression>::new(
-                    ExpressionBody::Vector(
-                        vec![ExpressionBody::Identifier("a".to_string()).into()]
-                    )
-                    .into()
+                Box::<Datum>::new(
+                    DatumBody::Vector(vec![DatumBody::Symbol("a".to_string()).into()]).into()
                 )
                 .into()
             )
@@ -1698,65 +1545,5 @@ fn import_cyclic() -> Result<()> {
         result,
         error!(LogicError::LibraryImportCyclic(library_name!("foo")))
     );
-    Ok(())
-}
-
-#[test]
-fn transformer() -> Result<()> {
-    let it = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
-    // transform to expression
-    it.env.define(
-        "foo".to_string(),
-        Value::Transformer(Transformer::Native(|expressions| {
-            Ok(vec![Statement::Expression(
-                ExpressionBody::ProcedureCall(
-                    Box::new(ExpressionBody::Identifier("+".to_string()).into()),
-                    expressions.into_iter().collect(),
-                )
-                .into(),
-            )])
-        })),
-    );
-    let env = it.env.clone();
-    assert_eq!(
-        Interpreter::eval_expression(
-            &ExpressionBody::ProcedureCall(
-                Box::new(ExpressionBody::Identifier("foo".to_string()).into()),
-                vec![
-                    ExpressionBody::Primitive(Primitive::Integer(1)).into(),
-                    ExpressionBody::Primitive(Primitive::Integer(2)).into(),
-                    ExpressionBody::Primitive(Primitive::Integer(3)).into(),
-                ],
-            )
-            .into(),
-            &env,
-        ),
-        Ok(Value::Number(Number::Integer(6)))
-    );
-    assert_eq!(
-        Interpreter::eval_tail_expression(
-            &ExpressionBody::ProcedureCall(
-                Box::new(ExpressionBody::Identifier("foo".to_string()).into()),
-                vec![
-                    ExpressionBody::Primitive(Primitive::Integer(1)).into(),
-                    ExpressionBody::Primitive(Primitive::Integer(2)).into(),
-                    ExpressionBody::Primitive(Primitive::Integer(3)).into(),
-                ],
-            )
-            .into(),
-            env.clone(),
-        ),
-        Ok(TailExpressionResult::TailCall(TailCall::Owned(
-            ExpressionBody::Identifier("+".to_string()).into(),
-            vec![
-                ExpressionBody::Primitive(Primitive::Integer(1)).into(),
-                ExpressionBody::Primitive(Primitive::Integer(2)).into(),
-                ExpressionBody::Primitive(Primitive::Integer(3)).into(),
-            ],
-            env,
-            PhantomData
-        )))
-    );
-
     Ok(())
 }
