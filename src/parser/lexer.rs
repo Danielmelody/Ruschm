@@ -180,9 +180,9 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
     fn test_delimiter(location: Option<[u32; 2]>, c: char) -> Result<()> {
         match c {
             ' ' | '\t' | '\n' | '\r' | '(' | ')' | '"' | ';' | '|' => Ok(()),
-            _ => {
+            other => {
                 return located_error!(
-                    SyntaxError::ExpectSomething("delimiter".to_string()),
+                    SyntaxError::ExpectSomething("delimiter".to_string(), other.to_string()),
                     location
                 )
             }

@@ -1,10 +1,9 @@
-use pair::Pair;
-
-use crate::{environment::*, interpreter::*};
-use crate::{error::ErrorData, error::ToLocated, parser::ParameterFormals};
-use std::rc::Rc;
-
+use crate::parser::pair::GenericPair;
+use crate::parser::*;
 use crate::values::*;
+use crate::{environment::*, interpreter::*};
+use crate::{error::ErrorData, error::ToLocated};
+use std::rc::Rc;
 
 fn apply<R: RealNumberInternalTrait>(
     arguments: impl IntoIterator<Item = Value<R>>,
@@ -17,8 +16,7 @@ fn apply<R: RealNumberInternalTrait>(
         let extended = args.pop().unwrap();
 
         let extended = match extended {
-            Value::Pair(p) => p.into_iter().collect::<Result<ArgVec<R>>>()?,
-            Value::EmptyList => ArgVec::new(),
+            Value::Pair(p) => p.into_iter().collect::<ArgVec<R>>(),
             other => return error!(LogicError::TypeMisMatch(other.to_string(), Type::Pair))?,
         };
         args.extend(extended);
@@ -30,24 +28,29 @@ fn car<R: RealNumberInternalTrait>(
     arguments: impl IntoIterator<Item = Value<R>>,
 ) -> Result<Value<R>> {
     let mut iter = arguments.into_iter();
-    Ok(iter.next().unwrap().expect_list_or_pair()?.car)
+    match iter.next().unwrap().expect_list()? {
+        Pair::Some(car, _) => Ok(car),
+        empty => return error!(LogicError::TypeMisMatch(empty.to_string(), Type::Pair)),
+    }
 }
 
 fn cdr<R: RealNumberInternalTrait>(
     arguments: impl IntoIterator<Item = Value<R>>,
 ) -> Result<Value<R>> {
     let mut iter = arguments.into_iter();
-    Ok(iter.next().unwrap().expect_list_or_pair()?.cdr)
+    match iter.next().unwrap().expect_list()? {
+        Pair::Some(cdr, _) => Ok(cdr.clone()),
+        empty => return error!(LogicError::TypeMisMatch(empty.to_string(), Type::Pair)),
+    }
 }
 
 fn cons<R: RealNumberInternalTrait>(
     arguments: impl IntoIterator<Item = Value<R>>,
 ) -> Result<Value<R>> {
     let mut iter = arguments.into_iter();
-    match (iter.next(), iter.next()) {
-        (Some(car), Some(cdr)) => Ok(Value::Pair(Box::new(Pair { car, cdr }))),
-        _ => unreachable!(),
-    }
+    let car = iter.next().unwrap();
+    let cdr = iter.next().unwrap();
+    Ok(Value::Pair(Box::new(Pair::Some(car, cdr))))
 }
 
 macro_rules! value_test {
@@ -70,9 +73,10 @@ fn eqv<R: RealNumberInternalTrait>(
     let b = iter.next().unwrap();
     match (&a, &b) {
         (Value::Vector(a), Value::Vector(b)) => Ok(Value::Boolean(a.ptr_eq(b))),
-        (Value::Pair(a), Value::Pair(b)) => Ok(Value::Boolean(
-            a.as_ref() as *const Pair<R> == b.as_ref() as *const Pair<R>,
-        )),
+        (Value::Pair(a), Value::Pair(b)) => Ok(Value::Boolean(match (a.as_ref(), b.as_ref()) {
+            (GenericPair::Empty, GenericPair::Empty) => true,
+            _ => a.as_ref() as *const Pair<R> == b.as_ref() as *const Pair<R>,
+        })),
         (Value::Number(a), Value::Number(b)) => Ok(Value::Boolean(a.exact_eqv(b))),
         _ => Ok(Value::Boolean(a == b)),
     }
@@ -90,11 +94,11 @@ fn equivalance_predicate() {
 
     {
         let arguments: Vec<Value<f32>> = vec![
-            Value::Pair(Box::new(Pair::new(
+            Value::Pair(Box::new(Pair::cons(
                 Value::Character('a'),
                 Value::Character('b'),
             ))),
-            Value::Pair(Box::new(Pair::new(
+            Value::Pair(Box::new(Pair::Some(
                 Value::Character('a'),
                 Value::Character('b'),
             ))),
@@ -124,7 +128,7 @@ fn equivalance_predicate() {
         assert_eq!(eqv(arguments), Ok(Value::Boolean(false)));
     }
     {
-        let arguments: Vec<Value<f32>> = vec![Value::EmptyList, Value::EmptyList];
+        let arguments: Vec<Value<f32>> = vec![Value::from(Pair::Empty), Value::from(Pair::Empty)];
         assert_eq!(eqv(arguments), Ok(Value::Boolean(true)));
     }
 }
@@ -575,8 +579,7 @@ fn newline<R: RealNumberInternalTrait>(_: impl IntoIterator<Item = Value<R>>) ->
 macro_rules! typed_comparision {
     ($name:tt, $operator:tt, $expect_type: tt) => {
         fn $name<R: RealNumberInternalTrait>(
-                        arguments: impl IntoIterator<Item = Value<R>>,
-
+            arguments: impl IntoIterator<Item = Value<R>>,
         ) -> Result<Value<R>> {
             let mut iter = arguments.into_iter();
             match iter.next() {
@@ -704,165 +707,124 @@ fn builtin_min() {
         assert_eq!(greater(arguments), Ok(Value::Boolean(false)));
     }
 }
+
 pub fn library_map<R: RealNumberInternalTrait>() -> Vec<(String, Value<R>)> {
-    vec![
-        function_mapping!(
-            "apply",
-            vec!["proc".to_string()],
-            Some("args".to_string()),
-            apply
-        ),
-        pure_function_mapping!("car", vec!["pair".to_string()], None, car),
-        pure_function_mapping!("cdr", vec!["pair".to_string()], None, cdr),
-        pure_function_mapping!(
-            "eqv?",
-            vec!["obj1".to_string(), "obj2".to_string()],
-            None,
-            eqv
-        ),
+    library_map_result().unwrap()
+}
+
+fn library_map_result<R: RealNumberInternalTrait>() -> Result<Vec<(String, Value<R>)>> {
+    Ok(vec![
+        function_mapping!("apply", append_param!(param_fixed!["proc"], "args"), apply),
+        pure_function_mapping!("car", param_fixed!["pair"], car),
+        pure_function_mapping!("cdr", param_fixed!["pair"], cdr),
+        pure_function_mapping!("eqv?", param_fixed!["obj1", "obj2"], eqv),
         pure_function_mapping!(
             "eq?", // Ruschm is pass-by value now, so that eq? is equivalent to eqv?
-            vec!["obj1".to_string(), "obj2".to_string()],
-            None,
+            param_fixed!["obj1", "obj2"],
             eqv
         ),
-        pure_function_mapping!(
-            "cons",
-            vec!["car".to_string(), "cdr".to_string()],
-            None,
-            cons
-        ),
+        pure_function_mapping!("cons", param_fixed!["car", "cdr"], cons),
         pure_function_mapping!(
             "boolean?",
-            vec!["obj".to_string()],
-            None,
+            param_fixed!["obj"],
             value_test!(Value::Boolean(_))
         ),
         pure_function_mapping!(
             "char?",
-            vec!["obj".to_string()],
-            None,
+            param_fixed!["obj"],
             value_test!(Value::Character(_))
         ),
         pure_function_mapping!(
             "number?",
-            vec!["obj".to_string()],
-            None,
+            param_fixed!["obj"],
             value_test!(Value::Number(_))
         ),
         pure_function_mapping!(
             "string?",
-            vec!["obj".to_string()],
-            None,
+            param_fixed!["obj"],
             value_test!(Value::String(_))
         ),
         pure_function_mapping!(
             "symbol?",
-            vec!["obj".to_string()],
-            None,
+            param_fixed!["obj"],
             value_test!(Value::Symbol(_))
         ),
-        pure_function_mapping!(
-            "pair?",
-            vec!["obj".to_string()],
-            None,
-            value_test!(Value::Pair(_))
-        ),
+        pure_function_mapping!("pair?", param_fixed!["obj"], value_test!(Value::Pair(_))),
         pure_function_mapping!(
             "procedure?",
-            vec!["obj".to_string()],
-            None,
+            param_fixed!["obj"],
             value_test!(Value::Procedure(_))
         ),
         pure_function_mapping!(
             "vector?",
-            vec!["obj".to_string()],
-            None,
+            param_fixed!["obj"],
             value_test!(Value::Vector(_))
         ),
-        pure_function_mapping!("not", vec!["obj".to_string()], None, not),
+        pure_function_mapping!("not", param_fixed!["obj"], not),
         pure_function_mapping!(
             "boolean=?",
-            vec![],
-            Some("booleans".to_string()),
+            append_param!(param_fixed![], "booleans"),
             boolean_equal
         ),
-        pure_function_mapping!("+", vec![], Some("x".to_string()), add),
-        pure_function_mapping!("-", vec!["x1".to_string()], Some("x".to_string()), sub),
-        pure_function_mapping!("*", vec![], Some("x".to_string()), mul),
-        pure_function_mapping!("/", vec!["x1".to_string()], Some("x".to_string()), div),
-        pure_function_mapping!("=", vec![], Some("x".to_string()), equals),
-        pure_function_mapping!("<", vec![], Some("x".to_string()), less),
-        pure_function_mapping!("<=", vec![], Some("x".to_string()), less_equal),
-        pure_function_mapping!(">", vec![], Some("x".to_string()), greater),
-        pure_function_mapping!(">=", vec![], Some("x".to_string()), greater_equal),
-        pure_function_mapping!("min", vec!["x1".to_string()], Some("x".to_string()), min),
-        pure_function_mapping!("max", vec!["x1".to_string()], Some("x".to_string()), max),
-        pure_function_mapping!("abs", vec!["x".to_string()], None, abs),
-        pure_function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
-        pure_function_mapping!("exp", vec!["z".to_string()], None, exp),
-        pure_function_mapping!("ln", vec!["z".to_string()], None, ln),
-        pure_function_mapping!("log", vec!["z1".to_string(), "z2".to_string()], None, log),
-        pure_function_mapping!("sin", vec!["z".to_string()], None, sin),
-        pure_function_mapping!("cos", vec!["z".to_string()], None, cos),
-        pure_function_mapping!("tan", vec!["z".to_string()], None, tan),
-        pure_function_mapping!("asin", vec!["z".to_string()], None, asin),
-        pure_function_mapping!("acos", vec!["z".to_string()], None, acos),
-        pure_function_mapping!("atan", vec!["z".to_string()], None, atan),
-        pure_function_mapping!("atan2", vec!["y".to_string(), "x".to_string()], None, atan2),
-        pure_function_mapping!("floor", vec!["x".to_string()], None, floor),
-        pure_function_mapping!("ceiling", vec!["x".to_string()], None, ceiling),
-        pure_function_mapping!("exact", vec!["x".to_string()], None, exact),
-        pure_function_mapping!(
-            "floor-quotient",
-            vec!["n1".to_string(), "n2".to_string()],
-            None,
-            floor_quotient
-        ),
-        pure_function_mapping!(
-            "floor-remainder",
-            vec!["n1".to_string(), "n2".to_string()],
-            None,
-            floor_remainder
-        ),
+        pure_function_mapping!("+", append_param!(param_fixed![], "x"), add),
+        pure_function_mapping!("-", append_param!(param_fixed!["x1"], "x"), sub),
+        pure_function_mapping!("*", append_param!(param_fixed![], "x"), mul),
+        pure_function_mapping!("/", append_param!(param_fixed!["x1"], "x"), div),
+        pure_function_mapping!("=", append_param!(param_fixed![], "x"), equals),
+        pure_function_mapping!("<", append_param!(param_fixed![], "x"), less),
+        pure_function_mapping!("<=", append_param!(param_fixed![], "x"), less_equal),
+        pure_function_mapping!(">", append_param!(param_fixed![], "x"), greater),
+        pure_function_mapping!(">=", append_param!(param_fixed![], "x"), greater_equal),
+        pure_function_mapping!("min", append_param!(param_fixed!["x1"], "x"), min),
+        pure_function_mapping!("max", append_param!(param_fixed!["x1"], "x"), max),
+        pure_function_mapping!("abs", param_fixed!["x"], abs),
+        pure_function_mapping!("sqrt", param_fixed!["x"], sqrt),
+        pure_function_mapping!("exp", param_fixed!["z"], exp),
+        pure_function_mapping!("ln", param_fixed!["z"], ln),
+        pure_function_mapping!("log", param_fixed!["z1", "z2"], log),
+        pure_function_mapping!("sin", param_fixed!["z"], sin),
+        pure_function_mapping!("cos", param_fixed!["z"], cos),
+        pure_function_mapping!("tan", param_fixed!["z"], tan),
+        pure_function_mapping!("asin", param_fixed!["z"], asin),
+        pure_function_mapping!("acos", param_fixed!["z"], acos),
+        pure_function_mapping!("atan", param_fixed!["z"], atan),
+        pure_function_mapping!("atan2", param_fixed!["y", "x"], atan2),
+        pure_function_mapping!("floor", param_fixed!["x"], floor),
+        pure_function_mapping!("ceiling", param_fixed!["x"], ceiling),
+        pure_function_mapping!("exact", param_fixed!["x"], exact),
+        pure_function_mapping!("floor-quotient", param_fixed!["n1", "n2"], floor_quotient),
+        pure_function_mapping!("floor-remainder", param_fixed!["n1", "n2"], floor_remainder),
         //pure_function_mapping!("display", vec!["value".to_string()], None, display),
-        pure_function_mapping!("newline", vec![], None, newline),
-        pure_function_mapping!("vector", vec![], Some("x".to_string()), vector),
-        pure_function_mapping!(
-            "make-vector",
-            vec!["k".to_string(), "obj".to_string()],
-            None,
-            make_vector
-        ),
-        pure_function_mapping!(
-            "vector-length",
-            vec!["vector".to_string()],
-            None,
-            vector_length
-        ),
-        pure_function_mapping!(
-            "vector-ref",
-            vec!["vector".to_string(), "k".to_string()],
-            None,
-            vector_ref
-        ),
+        pure_function_mapping!("newline", param_fixed![], newline),
+        pure_function_mapping!("vector", param_fixed![], vector),
+        pure_function_mapping!("make-vector", param_fixed!["k", "obj"], make_vector),
+        pure_function_mapping!("vector-length", param_fixed!["vector"], vector_length),
+        pure_function_mapping!("vector-ref", param_fixed!["vector", "k"], vector_ref),
         pure_function_mapping!(
             "vector-set!",
-            vec!["vector".to_string(), "k".to_string(), "obj".to_string()],
-            None,
+            param_fixed!["vector", "k", "obj"],
             vector_set
         ),
-    ]
+    ])
 }
 
 #[test]
 fn builtin_parameters_length() -> Result<()> {
-    let base_library_map = library_map::<f32>();
-    assert!(matches!(
-        &base_library_map.iter().find(|(name, _) |name.as_str() == "sqrt").unwrap().1,
-        Value::Procedure(Procedure::Builtin(sqrt)) if sqrt.parameters.0.len() == 1));
-    assert!(matches!(
-        &base_library_map.iter().find(|(name, _) |name.as_str() == "newline").unwrap().1,
-        Value::Procedure(Procedure::Builtin(newline)) if newline.parameters.0.len() == 0));
+    let sqrt = library_map::<f32>()
+        .into_iter()
+        .find(|(name, _)| name.as_str() == "sqrt")
+        .unwrap()
+        .1
+        .expect_procedure()?;
+    let newline = library_map::<f32>()
+        .into_iter()
+        .find(|(name, _)| name.as_str() == "newline")
+        .unwrap()
+        .1
+        .expect_procedure()?;
+
+    println!("{}", sqrt.get_parameters());
+    assert_eq!(sqrt.get_parameters().len(), (1, false));
+    assert_eq!(newline.get_parameters().len(), (0, false));
     Ok(())
 }

@@ -8,7 +8,7 @@ use fmt::Display;
 use crate::{interpreter::error::LogicError, parser::error::SyntaxError};
 
 #[derive(Debug, Clone, Copy)]
-pub struct Located<T: PartialEq> {
+pub struct Located<T> {
     pub data: T,
     pub location: Option<[u32; 2]>,
 }
@@ -55,7 +55,7 @@ impl<T: PartialEq> PartialEq for Located<T> {
     }
 }
 
-impl<T: PartialEq + Display> Display for Located<T> {
+impl<T: Display> Display for Located<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.data.fmt(f)
     }

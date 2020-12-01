@@ -1,9 +1,7 @@
-use std::ops::Deref;
-
 use crate::{
     error::{ErrorData, Located, SchemeError, ToLocated},
-    interpreter::{error::LogicError, library::LibraryName},
-    parser::{Lexer, LibraryDefinition, Parser, Statement},
+    interpreter::error::LogicError,
+    parser::{Lexer, LibraryDefinition, LibraryName, Parser, Statement},
 };
 
 pub enum GenericLibraryFactory<'a, V> {
@@ -26,7 +24,7 @@ impl<'a, V> GenericLibraryFactory<'a, V> {
         let parser = Parser::from_lexer(lexer);
         for statement in parser {
             if let Statement::LibraryDefinition(library_definition) = statement? {
-                if library_definition.0.deref() == expect_library_name {
+                if &library_definition.0 == expect_library_name {
                     return Ok(Self::AST(library_definition));
                 }
             }

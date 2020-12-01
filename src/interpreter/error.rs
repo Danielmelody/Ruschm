@@ -4,7 +4,7 @@ use crate::{
     parser::error::SyntaxError, parser::Expression, parser::ParameterFormals, values::Type,
 };
 
-use super::library::LibraryName;
+use crate::parser::LibraryName;
 
 #[derive(Error, Debug, PartialEq, Clone)]
 pub enum LogicError {
@@ -18,19 +18,14 @@ pub enum LogicError {
     DivisionByZero,
     #[error("{0} cannot be converted to an exact number")]
     InExactConversion(String),
-    #[error("inproper list")]
+    #[error("expect a proper list, encounter inproper list {0}")]
     InproperList(String),
     #[error("expect a non-negative length")]
     NegativeLength,
     #[error("vector index out of bound")]
     VectorIndexOutOfBounds,
-    #[error("expect {}{} arguments, got {}. parameter list is: {}",
-    if (.0).1.is_some() { "at least " } else { "" },
-    (.0).0.len(),
-    .1,
-    .0,)
-    ]
-    ArgumentMissMatch(ParameterFormals, usize),
+    #[error("expect parameters {0}, got arguments {1}")]
+    ArgumentMissMatch(ParameterFormals, String),
     #[error("requires {0} to be mutable")]
     RequiresMutable(String),
     #[error(transparent)]
