@@ -19,6 +19,7 @@ use super::library::LibraryName;
 use super::library::{native, Library};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
+#[derive(Clone, PartialEq, Debug)]
 pub enum LibraryFactory<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     Native(LibraryName, fn() -> Vec<(String, Value<R, E>)>),
     AST(Located<LibraryDefinition>),
@@ -92,6 +93,7 @@ impl<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> TailCall<'a, R, E> {
         }
     }
 }
+#[derive(Clone, PartialEq, Debug)]
 pub struct LibraryLoader<R: RealNumberInternalTrait, E: IEnvironment<R>> {
     lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R, E>>>,
 }
