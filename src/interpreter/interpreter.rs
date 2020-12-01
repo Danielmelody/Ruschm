@@ -146,7 +146,9 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         interpreter.eval("(import (scheme write))".chars()).unwrap();
         interpreter
     }
-
+    pub fn get_lib_loader(&self) -> &LibraryLoader<R, E> {
+        &self.lib_loader
+    }
     pub fn append_lib_loader(&mut self, lib_loader: LibraryLoader<R, E>) {
         self.lib_loader
             .lib_factories
