@@ -112,6 +112,9 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryLoader<R, E> {
         self.register_library_factory(library_factory);
         self
     }
+    pub fn iter_library_names(&self) -> impl Iterator<Item = &LibraryName> {
+        self.lib_factories.keys()
+    }
 }
 
 pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
