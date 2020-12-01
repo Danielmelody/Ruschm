@@ -112,6 +112,31 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryLoader<R, E> {
         self.register_library_factory(library_factory);
         self
     }
+    /// iterate all registered library name in library loader
+    /// # Example
+    /// ```
+    /// use ruschm::library_name;
+    /// use ruschm::environment::StandardEnv;
+    /// use ruschm::interpreter::{LibraryLoader, LibraryFactory, library::LibraryName};
+    /// use std::collections::HashSet;
+    /// let library_loader = LibraryLoader::<f32, StandardEnv<_>>::new()
+    ///     .with_lib_factory(LibraryFactory::Native(library_name!("foo"), || vec![]))
+    ///     .with_lib_factory(LibraryFactory::Native(
+    ///         library_name!("foo", "bar"),
+    ///         || vec![],
+    ///     ))
+    ///     .with_lib_factory(LibraryFactory::Native(library_name!(0, "a"), || vec![]));
+    /// assert_eq!(
+    ///     library_loader.iter_library_names().collect::<HashSet<_>>(),
+    ///     vec![
+    ///         &library_name!("foo"),
+    ///         &library_name!("foo", "bar"),
+    ///         &library_name!(0, "a")
+    ///     ]
+    ///     .into_iter()
+    ///     .collect::<HashSet<_>>()
+    /// );
+    /// ```
     pub fn iter_library_names(&self) -> impl Iterator<Item = &LibraryName> {
         self.lib_factories.keys()
     }
