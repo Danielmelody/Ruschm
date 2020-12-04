@@ -167,10 +167,18 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 
     pub fn new_with_stdlib() -> Self {
         let mut interpreter = Interpreter::<R, E>::new();
-        interpreter.eval("(import (scheme base))".chars()).unwrap();
-        interpreter.eval("(import (scheme write))".chars()).unwrap();
+        interpreter
+            .eval_import(
+                &ImportDeclaration(vec![
+                    import_library_direct!("scheme", "base"),
+                    import_library_direct!("scheme", "write"),
+                ]),
+                interpreter.env.clone(),
+            )
+            .unwrap();
         interpreter
     }
+
     pub fn get_lib_loader(&self) -> &LibraryLoader<R, E> {
         &self.lib_loader
     }

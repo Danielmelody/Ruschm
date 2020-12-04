@@ -4,6 +4,13 @@ macro_rules! library_name {
         LibraryName(vec![$($e.into()),+])
     };
 }
+
+macro_rules! import_library_direct {
+    ($($e:expr),+) => {
+        ImportSetBody::Direct(library_name![$($e),+].into()).no_locate()
+    };
+}
+
 pub mod native;
 use itertools::Itertools;
 
