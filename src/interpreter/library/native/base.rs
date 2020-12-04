@@ -614,7 +614,7 @@ typed_comparision!(greater, >, expect_number);
 typed_comparision!(greater_equal, >=, expect_number);
 typed_comparision!(less, <, expect_number);
 typed_comparision!(less_equal, <=, expect_number);
-typed_comparision!(boolean_equal, <=, expect_boolean);
+typed_comparision!(boolean_equal, ==, expect_boolean);
 
 #[test]
 fn builtin_greater() {
