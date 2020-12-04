@@ -559,12 +559,6 @@ impl<T: Display> Display for ValueReference<Vec<T>> {
     }
 }
 
-// impl<T> Display for ValueReference<T> {
-//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-//         todo!()
-//     }
-// }
-
 impl<T: Display> ValueReference<Vec<T>> {
     pub fn new_immutable(t: Vec<T>) -> Self {
         Self::Immutable(Rc::new(t))
@@ -715,6 +709,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Value<R, E> {
         }
     }
 }
+
+// impl FromIterator ValueReference
 
 fn check_division_by_zero(num: i32) -> Result<()> {
     match num {

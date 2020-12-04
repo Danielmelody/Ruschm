@@ -40,3 +40,78 @@ fn apply() -> Result<(), SchemeError> {
     );
     Ok(())
 }
+
+#[test]
+fn booleans() -> Result<(), SchemeError> {
+    {
+        let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+        assert_eq!(
+            interpreter.eval("(not #f)".chars())?,
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            interpreter.eval("(not #t)".chars())?,
+            Some(Value::Boolean(false))
+        );
+        assert_eq!(
+            interpreter.eval("(not '())".chars())?,
+            Some(Value::Boolean(false))
+        );
+        assert_eq!(
+            interpreter.eval("(not 1)".chars())?,
+            Some(Value::Boolean(false))
+        );
+        assert_eq!(
+            interpreter.eval("(not 0)".chars())?,
+            Some(Value::Boolean(false))
+        );
+    }
+
+    {
+        let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+        assert_eq!(
+            interpreter.eval("(boolean? #t)".chars())?,
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            interpreter.eval("(boolean? #f)".chars())?,
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            interpreter.eval("(boolean? '())".chars())?,
+            Some(Value::Boolean(false))
+        );
+        assert_eq!(
+            interpreter.eval("(boolean? 1)".chars())?,
+            Some(Value::Boolean(false))
+        );
+        assert_eq!(
+            interpreter.eval("(boolean? 0)".chars())?,
+            Some(Value::Boolean(false))
+        );
+    }
+
+    {
+        let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+        assert_eq!(
+            interpreter.eval("(boolean=? #t #t)".chars())?,
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            interpreter.eval("(boolean=? #f #f)".chars())?,
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            interpreter.eval("(boolean=? #f #t)".chars())?,
+            Some(Value::Boolean(false))
+        );
+        assert_eq!(
+            interpreter.eval("(boolean=? 1 1)".chars()),
+            Err(
+                ErrorData::Logic(LogicError::TypeMisMatch("1".to_string(), Type::Boolean))
+                    .no_locate()
+            )
+        );
+    }
+    Ok(())
+}
