@@ -53,7 +53,7 @@ pub enum Statement {
 }
 
 impl Statement {
-    fn location(&self) -> Option<[u32; 2]> {
+    pub fn location(&self) -> Option<[u32; 2]> {
         match self {
             Statement::ImportDeclaration(located) => located.location,
             Statement::Definition(located) => located.location,

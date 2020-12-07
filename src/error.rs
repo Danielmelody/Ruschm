@@ -35,12 +35,6 @@ pub trait ToLocated {
     }
 }
 impl<T: PartialEq> Located<T> {
-    pub fn map<U: PartialEq>(self, f: impl Fn(T) -> U) -> Located<U> {
-        Located::<U> {
-            data: f(self.data),
-            location: self.location,
-        }
-    }
     pub fn extract_data(self) -> T {
         self.data
     }
