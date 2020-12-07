@@ -670,6 +670,21 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     }
 
     pub fn eval_ast(&mut self, ast: &Statement, env: Rc<E>) -> Result<Option<Value<R, E>>> {
+        let ast_location = ast.location();
+        match self.eval_ast_error_no_location(ast, env) {
+            Ok(value) => Ok(value),
+            Err(Located { data, location }) => Err(data.locate(
+                // prevent loss accurate location
+                location.or(ast_location),
+            )),
+        }
+    }
+
+    pub fn eval_ast_error_no_location(
+        &mut self,
+        ast: &Statement,
+        env: Rc<E>,
+    ) -> Result<Option<Value<R, E>>> {
         if !self.import_end {
             Ok(match ast {
                 Statement::ImportDeclaration(imports) => {
@@ -1768,5 +1783,23 @@ fn transformer() -> Result<()> {
         )))
     );
 
+    Ok(())
+}
+
+#[test]
+fn ast_location() -> Result<()> {
+    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    assert_eq!(
+        interpreter
+            .eval_ast(
+                &ExpressionBody::Identifier("foo".to_string())
+                    .locate(Some([4, 6]))
+                    .into(),
+                Rc::new(StandardEnv::new())
+            )
+            .unwrap_err()
+            .location,
+        Some([4, 6])
+    );
     Ok(())
 }
