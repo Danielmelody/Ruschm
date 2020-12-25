@@ -23,10 +23,6 @@ fn apply<R: RealNumberInternalTrait, E: IEnvironment<R>>(
         };
         args.extend(extended);
     }
-    for arg in &args {
-        print!("{}", arg)
-    }
-    println!();
     Interpreter::apply_procedure(&proc, args, &env)
 }
 
