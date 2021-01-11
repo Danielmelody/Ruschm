@@ -9,72 +9,33 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::rc::Rc;
 
-pub type DefinitionIter<'a, R, E> = Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R, E>)>>;
-
-pub trait IEnvironment<R: RealNumberInternalTrait>: std::fmt::Debug + Clone + PartialEq {
-    fn new() -> Self
-    where
-        Self: Sized;
-    fn define(&self, name: String, value: Value<R, Self>)
-    where
-        Self: Sized;
-    fn get(&self, name: &str) -> Option<Ref<Value<R, Self>>>
-    where
-        Self: Sized;
-    fn get_mut(&self, name: &str) -> Option<RefMut<Value<R, Self>>>
-    where
-        Self: Sized;
-    fn set(&self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError>
-    where
-        Self: Sized;
-    fn new_child(parent: Rc<Self>) -> Self
-    where
-        Self: Sized;
-    /// iterate all local definitions in environment
-    /// # Example
-    /// ```
-    /// use ruschm::environment::{IEnvironment, StandardEnv};
-    /// use ruschm::values::Value;
-    /// use std::collections::HashMap;
-    /// let env = StandardEnv::<f32>::new();
-    /// env.define("a".to_string(), Value::Void);
-    /// env.define("b".to_string(), Value::Boolean(true));
-    /// let mut definitions = env.iter_local_definitions();
-    /// let mut result = HashMap::new();
-    /// for (name, value) in definitions.as_mut() {
-    ///     result.insert(name, value);
-    /// }
-    /// assert_eq!(result[&"a".to_string()], &Value::Void);
-    /// assert_eq!(result[&"b".to_string()], &Value::Boolean(true));
-    /// ```
-    fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R, Self>>;
-}
+pub type DefinitionIter<'a, R> = Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R>)>>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct StandardEnv<R: RealNumberInternalTrait> {
-    parent: Option<Rc<StandardEnv<R>>>,
-    definitions: RefCell<HashMap<String, Value<R, StandardEnv<R>>>>,
+pub struct Environment<R: RealNumberInternalTrait> {
+    parent: Option<Rc<Environment<R>>>,
+    definitions: RefCell<HashMap<String, Value<R>>>,
 }
 
-impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
-    fn new() -> Self {
+impl<R: RealNumberInternalTrait> Environment<R> {
+    pub fn new() -> Self {
         Self {
             parent: None,
             definitions: RefCell::new(HashMap::new()),
         }
     }
-    fn new_child(parent: Rc<StandardEnv<R>>) -> Self {
+    pub fn new_child(parent: Rc<Environment<R>>) -> Self {
         Self {
             parent: Some(parent),
             definitions: RefCell::new(HashMap::new()),
         }
     }
 
-    fn define(&self, name: String, value: Value<R, Self>) {
+    pub fn define(&self, name: String, value: Value<R>) {
         self.definitions.borrow_mut().insert(name, value);
     }
 
-    fn get(&self, name: &str) -> Option<Ref<Value<R, Self>>> {
+    pub fn get(&self, name: &str) -> Option<Ref<Value<R>>> {
         if self.definitions.borrow().contains_key(name) {
             Some(Ref::map(self.definitions.borrow(), |definitions| {
                 definitions.get(name).unwrap()
@@ -86,7 +47,7 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
             }
         }
     }
-    fn get_mut(&self, name: &str) -> Option<RefMut<Value<R, Self>>> {
+    pub fn get_mut(&self, name: &str) -> Option<RefMut<Value<R>>> {
         if self.definitions.borrow().contains_key(name) {
             Some(RefMut::map(self.definitions.borrow_mut(), |definitions| {
                 definitions.get_mut(name).unwrap()
@@ -99,7 +60,7 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
         }
     }
 
-    fn set(&self, name: &str, value: Value<R, Self>) -> Result<(), SchemeError> {
+    pub fn set(&self, name: &str, value: Value<R>) -> Result<(), SchemeError> {
         match self.definitions.borrow_mut().get_mut(name) {
             None => match &self.parent {
                 None => {
@@ -114,17 +75,17 @@ impl<R: RealNumberInternalTrait> IEnvironment<R> for StandardEnv<R> {
         Ok(())
     }
 
-    fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R, Self>> {
+    pub fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R>> {
         Ref::map_val(
             self.definitions.borrow(),
-            |definitions| -> DefinitionIter<'b, R, Self> { Box::new(definitions.iter()) },
+            |definitions| -> DefinitionIter<'b, R> { Box::new(definitions.iter()) },
         )
     }
 }
 
 #[test]
 fn iter_envs() -> Result<(), Box<dyn std::error::Error>> {
-    let it = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let it = Interpreter::<f32>::new_with_stdlib();
     {
         it.env.define("a".to_string(), Value::Void);
     }
@@ -145,7 +106,7 @@ fn iter_envs() -> Result<(), Box<dyn std::error::Error>> {
 fn get_mut() -> Result<(), Box<dyn Error>> {
     use crate::values::Number;
     use std::ops::Deref;
-    let env = StandardEnv::<f32>::new();
+    let env = Environment::<f32>::new();
     env.define("x".to_string(), Value::Number(Number::Integer(1)));
     {
         let value_mut = env.get_mut("x").unwrap();

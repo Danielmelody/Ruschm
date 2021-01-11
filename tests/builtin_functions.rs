@@ -1,5 +1,4 @@
 use ruschm::{
-    environment::StandardEnv,
     error::ToLocated,
     error::{ErrorData, SchemeError},
     interpreter::{error::LogicError, pair::Pair, Interpreter},
@@ -10,7 +9,7 @@ use ruschm::{
 
 #[test]
 fn list() -> Result<(), SchemeError> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
     assert_eq!(
         interpreter.eval("(list 1 2 3)".chars())?,
         Some(Value::Pair(Box::new(Pair::new(
@@ -29,7 +28,7 @@ fn list() -> Result<(), SchemeError> {
 
 #[test]
 fn apply() -> Result<(), SchemeError> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
     assert_eq!(
         interpreter.eval("(apply + 1 2 '(3 4))".chars())?,
         Some(Value::Number(Number::Integer(10)))
@@ -44,7 +43,7 @@ fn apply() -> Result<(), SchemeError> {
 #[test]
 fn booleans() -> Result<(), SchemeError> {
     {
-        let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+        let mut interpreter = Interpreter::<f32>::new_with_stdlib();
         assert_eq!(
             interpreter.eval("(not #f)".chars())?,
             Some(Value::Boolean(true))
@@ -68,7 +67,7 @@ fn booleans() -> Result<(), SchemeError> {
     }
 
     {
-        let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+        let mut interpreter = Interpreter::<f32>::new_with_stdlib();
         assert_eq!(
             interpreter.eval("(boolean? #t)".chars())?,
             Some(Value::Boolean(true))
@@ -92,7 +91,7 @@ fn booleans() -> Result<(), SchemeError> {
     }
 
     {
-        let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+        let mut interpreter = Interpreter::<f32>::new_with_stdlib();
         assert_eq!(
             interpreter.eval("(boolean=? #t #t)".chars())?,
             Some(Value::Boolean(true))

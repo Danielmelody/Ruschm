@@ -14,7 +14,7 @@ macro_rules! import_library_direct {
 pub mod native;
 use itertools::Itertools;
 
-use crate::{environment::*, error::*, values::*};
+use crate::{error::*, values::*};
 use std::{collections::HashMap, fmt::Display, iter::FromIterator, path::PathBuf};
 
 // r7rs:
@@ -113,21 +113,18 @@ impl LibraryName {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Library<R: RealNumberInternalTrait, E: IEnvironment<R>>(
-    Located<LibraryName>,
-    HashMap<String, Value<R, E>>,
-);
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Library<R, E> {
+pub struct Library<R: RealNumberInternalTrait>(Located<LibraryName>, HashMap<String, Value<R>>);
+impl<R: RealNumberInternalTrait> Library<R> {
     pub fn new(
         library_name: Located<LibraryName>,
-        definitions: impl IntoIterator<Item = (String, Value<R, E>)>,
+        definitions: impl IntoIterator<Item = (String, Value<R>)>,
     ) -> Self {
         Self(library_name, definitions.into_iter().collect())
     }
     pub fn name(&self) -> &Located<LibraryName> {
         &self.0
     }
-    pub fn iter_definitions(&self) -> impl Iterator<Item = (&String, &Value<R, E>)> {
+    pub fn iter_definitions(&self) -> impl Iterator<Item = (&String, &Value<R>)> {
         self.1.iter().map(|(s, value)| (s, value))
     }
 }
