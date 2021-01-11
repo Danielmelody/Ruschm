@@ -23,13 +23,13 @@ use crate::{
 
 type Result<T> = std::result::Result<T, SchemeError>;
 
-pub trait RealNumberInternalTrait: Display + Debug + Real + Default
+pub trait RealNumberInternalTrait: Display + Debug + Real + Default + 'static
 where
     Self: std::marker::Sized,
 {
 }
 
-impl<T: Display + Debug + Real + Default> RealNumberInternalTrait for T {}
+impl<T: Display + Debug + Real + Default + 'static> RealNumberInternalTrait for T {}
 #[derive(Debug, Clone, Copy)]
 pub enum Number<R: RealNumberInternalTrait> {
     Integer(i32),
@@ -440,12 +440,25 @@ fn number_exact() {
 
 pub type ArgVec<R> = SmallVec<[Value<R>; 4]>;
 
-#[derive(Clone, PartialEq)]
-pub enum BuiltinProcedurePointer<R: RealNumberInternalTrait> {
+#[derive(Clone)]
+pub enum BuiltinProcedureBody<R: RealNumberInternalTrait> {
     Pure(fn(ArgVec<R>) -> Result<Value<R>>),
-    Impure(fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>>),
+    Impure(Rc<dyn Fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>>>),
 }
-impl<R: RealNumberInternalTrait> BuiltinProcedurePointer<R> {
+
+impl<R: RealNumberInternalTrait> PartialEq for BuiltinProcedureBody<R> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (BuiltinProcedureBody::Pure(fpa), BuiltinProcedureBody::Pure(fpb)) => fpa == fpb,
+            (BuiltinProcedureBody::Impure(fpa), BuiltinProcedureBody::Impure(fpb)) => {
+                Rc::ptr_eq(fpa, fpb)
+            }
+            _ => false,
+        }
+    }
+}
+
+impl<R: RealNumberInternalTrait> BuiltinProcedureBody<R> {
     pub fn apply(&self, args: ArgVec<R>, env: &Rc<Environment<R>>) -> Result<Value<R>> {
         match &self {
             Self::Pure(pointer) => pointer(args),
@@ -457,7 +470,7 @@ impl<R: RealNumberInternalTrait> BuiltinProcedurePointer<R> {
 pub struct BuiltinProcedure<R: RealNumberInternalTrait> {
     pub name: &'static str,
     pub parameters: ParameterFormals,
-    pub pointer: BuiltinProcedurePointer<R>,
+    pub body: BuiltinProcedureBody<R>,
 }
 
 impl<R: RealNumberInternalTrait> Display for BuiltinProcedure<R> {
@@ -502,23 +515,23 @@ impl<R: RealNumberInternalTrait> Procedure<R> {
     pub fn new_builtin_pure(
         name: &'static str,
         parameters: ParameterFormals,
-        pointer: fn(ArgVec<R>) -> Result<Value<R>>,
+        function: fn(ArgVec<R>) -> Result<Value<R>>,
     ) -> Self {
         Self::Builtin(BuiltinProcedure {
             name,
             parameters,
-            pointer: BuiltinProcedurePointer::Pure(pointer),
+            body: BuiltinProcedureBody::Pure(function),
         })
     }
     pub fn new_builtin_impure(
         name: &'static str,
         parameters: ParameterFormals,
-        pointer: fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>>,
+        pointer: impl Fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>> + 'static,
     ) -> Self {
         Self::Builtin(BuiltinProcedure {
             name,
             parameters,
-            pointer: BuiltinProcedurePointer::Impure(pointer),
+            body: BuiltinProcedureBody::Impure(Rc::new(pointer)),
         })
     }
     pub fn get_parameters(&self) -> &ParameterFormals {

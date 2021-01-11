@@ -285,8 +285,8 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
             } else {
                 current_procedure.as_ref().unwrap()
             } {
-                Procedure::Builtin(BuiltinProcedure { pointer, .. }) => {
-                    break pointer.apply(args, env);
+                Procedure::Builtin(BuiltinProcedure { body, .. }) => {
+                    break body.apply(args, env);
                 }
                 Procedure::User(SchemeProcedure(formals, definitions, expressions), closure) => {
                     let apply_result = Self::apply_scheme_procedure(
