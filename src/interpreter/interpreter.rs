@@ -19,13 +19,13 @@ use super::library::LibraryName;
 use super::library::{native, Library};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
-pub enum LibraryFactory<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    Native(LibraryName, fn() -> Vec<(String, Value<R, E>)>),
+pub enum LibraryFactory<R: RealNumberInternalTrait> {
+    Native(LibraryName, fn() -> Vec<(String, Value<R>)>),
     AST(Located<LibraryDefinition>),
 }
 #[test]
 fn library_factory() -> Result<()> {
-    let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut it = Interpreter::<f32>::new();
     it.register_library_factory(LibraryFactory::Native(library_name!("foo"), || {
         vec![("a".to_string(), Value::Void)]
     }));
@@ -50,7 +50,7 @@ fn library_factory() -> Result<()> {
     Ok(())
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryFactory<R, E> {
+impl<R: RealNumberInternalTrait> LibraryFactory<R> {
     pub fn get_library_name(&self) -> &LibraryName {
         match self {
             LibraryFactory::Native(name, _) => name,
@@ -75,40 +75,45 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryFactory<R, E> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum TailExpressionResult<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    TailCall(TailCall<'a, R, E>),
-    Value(Value<R, E>),
+enum TailExpressionResult<'a, R: RealNumberInternalTrait> {
+    TailCall(TailCall<'a, R>),
+    Value(Value<R>),
 }
 #[derive(Debug, Clone, PartialEq)]
-enum TailCall<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    Ref(&'a Expression, &'a [Expression], Rc<E>),
-    Owned(Expression, Vec<Expression>, Rc<E>, PhantomData<R>),
+enum TailCall<'a, R: RealNumberInternalTrait> {
+    Ref(&'a Expression, &'a [Expression], Rc<Environment<R>>),
+    Owned(
+        Expression,
+        Vec<Expression>,
+        Rc<Environment<R>>,
+        PhantomData<R>,
+    ),
 }
-impl<'a, R: RealNumberInternalTrait, E: IEnvironment<R>> TailCall<'a, R, E> {
-    pub fn as_ref(&'a self) -> (&'a Expression, &'a [Expression], &Rc<E>) {
+impl<'a, R: RealNumberInternalTrait> TailCall<'a, R> {
+    pub fn as_ref(&'a self) -> (&'a Expression, &'a [Expression], &Rc<Environment<R>>) {
         match self {
             TailCall::Ref(procedure_expr, arguments, env) => (procedure_expr, arguments, env),
             TailCall::Owned(procedure_expr, arguments, env, _) => (procedure_expr, arguments, env),
         }
     }
 }
-pub struct LibraryLoader<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R, E>>>,
+pub struct LibraryLoader<R: RealNumberInternalTrait> {
+    lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R>>>,
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryLoader<R, E> {
+impl<R: RealNumberInternalTrait> LibraryLoader<R> {
     pub fn new() -> Self {
         Self {
             lib_factories: HashMap::new(),
         }
     }
-    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R, E>) {
+    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R>) {
         self.lib_factories.insert(
             library_factory.get_library_name().clone(),
             Rc::new(library_factory),
         );
     }
-    pub fn with_lib_factory(mut self, library_factory: LibraryFactory<R, E>) -> Self {
+    pub fn with_lib_factory(mut self, library_factory: LibraryFactory<R>) -> Self {
         self.register_library_factory(library_factory);
         self
     }
@@ -116,10 +121,10 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryLoader<R, E> {
     /// # Example
     /// ```
     /// use ruschm::library_name;
-    /// use ruschm::environment::StandardEnv;
+    /// use ruschm::environment::Environment;
     /// use ruschm::interpreter::{LibraryLoader, LibraryFactory, library::LibraryName};
     /// use std::collections::HashSet;
-    /// let library_loader = LibraryLoader::<f32, StandardEnv<_>>::new()
+    /// let library_loader = LibraryLoader::<f32>::new()
     ///     .with_lib_factory(LibraryFactory::Native(library_name!("foo"), || vec![]))
     ///     .with_lib_factory(LibraryFactory::Native(
     ///         library_name!("foo", "bar"),
@@ -142,19 +147,19 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> LibraryLoader<R, E> {
     }
 }
 
-pub struct Interpreter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    pub env: Rc<E>,
-    lib_loader: LibraryLoader<R, E>,
+pub struct Interpreter<R: RealNumberInternalTrait> {
+    pub env: Rc<Environment<R>>,
+    lib_loader: LibraryLoader<R>,
     imported_library: HashSet<LibraryName>,
     import_end: bool, // indicate program's import declaration part end
     pub program_directory: Option<PathBuf>,
     _marker: PhantomData<R>,
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
+impl<R: RealNumberInternalTrait> Interpreter<R> {
     pub fn new() -> Self {
         let mut interpreter = Self {
-            env: Rc::new(E::new()),
+            env: Rc::new(Environment::new()),
             lib_loader: LibraryLoader::new(),
             imported_library: HashSet::new(),
             import_end: false,
@@ -166,7 +171,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     }
 
     pub fn new_with_stdlib() -> Self {
-        let mut interpreter = Interpreter::<R, E>::new();
+        let mut interpreter = Interpreter::<R>::new();
         interpreter
             .eval_import(
                 &ImportDeclaration(vec![
@@ -179,15 +184,15 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         interpreter
     }
 
-    pub fn get_lib_loader(&self) -> &LibraryLoader<R, E> {
+    pub fn get_lib_loader(&self) -> &LibraryLoader<R> {
         &self.lib_loader
     }
-    pub fn append_lib_loader(&mut self, lib_loader: LibraryLoader<R, E>) {
+    pub fn append_lib_loader(&mut self, lib_loader: LibraryLoader<R>) {
         self.lib_loader
             .lib_factories
             .extend(lib_loader.lib_factories.into_iter());
     }
-    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R, E>) {
+    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R>) {
         self.lib_loader.register_library_factory(library_factory);
     }
 
@@ -220,10 +225,10 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         formals: &ParameterFormals,
         internal_definitions: &[Definition],
         expressions: &'a [Expression],
-        closure: Rc<E>,
-        args: ArgVec<R, E>,
-    ) -> Result<TailExpressionResult<'a, R, E>> {
-        let local_env = Rc::new(E::new_child(closure.clone()));
+        closure: Rc<Environment<R>>,
+        args: ArgVec<R>,
+    ) -> Result<TailExpressionResult<'a, R>> {
+        let local_env = Rc::new(Environment::new_child(closure.clone()));
         let mut arg_iter = args.into_iter();
         for (param, arg) in formals.0.iter().zip(arg_iter.by_ref()) {
             local_env.define(param.clone(), arg);
@@ -247,28 +252,28 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
 
-    pub(self) fn eval_root_expression(&self, expression: Expression) -> Result<Value<R, E>> {
+    pub(self) fn eval_root_expression(&self, expression: Expression) -> Result<Value<R>> {
         Self::eval_expression(&expression, &self.env)
     }
 
     fn eval_procedure_call(
         procedure_expr: &Expression,
         arguments: &[Expression],
-        env: &Rc<E>,
-    ) -> Result<(Procedure<R, E>, ArgVec<R, E>)> {
+        env: &Rc<Environment<R>>,
+    ) -> Result<(Procedure<R>, ArgVec<R>)> {
         let first = Self::eval_expression(procedure_expr, env)?;
         let evaluated_args_result = arguments
             .iter()
             .map(|arg| Self::eval_expression(arg, env))
-            .collect::<Result<ArgVec<_, _>>>()?;
+            .collect::<Result<ArgVec<_>>>()?;
         Ok((first.expect_procedure()?, evaluated_args_result))
     }
 
     pub fn apply_procedure<'a>(
-        initial_procedure: &Procedure<R, E>,
-        mut args: ArgVec<R, E>,
-        env: &Rc<E>,
-    ) -> Result<Value<R, E>> {
+        initial_procedure: &Procedure<R>,
+        mut args: ArgVec<R>,
+        env: &Rc<Environment<R>>,
+    ) -> Result<Value<R>> {
         let formals = initial_procedure.get_parameters();
         if args.len() < formals.0.len() || (args.len() > formals.0.len() && formals.1.is_none()) {
             return error!(LogicError::ArgumentMissMatch(formals.clone(), args.len()));
@@ -314,8 +319,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 
     fn eval_tail_expression<'a>(
         expression: &'a Expression,
-        env: Rc<E>,
-    ) -> Result<TailExpressionResult<'a, R, E>> {
+        env: Rc<Environment<R>>,
+    ) -> Result<TailExpressionResult<'a, R>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
                 if let Some(expanded) =
@@ -349,8 +354,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     // it has to repeat this logic for owned expression, no other workaround
     fn eval_owned_tail_expression<'a>(
         expression: Expression,
-        env: Rc<E>,
-    ) -> Result<TailExpressionResult<'a, R, E>> {
+        env: Rc<Environment<R>>,
+    ) -> Result<TailExpressionResult<'a, R>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(..) | ExpressionBody::Conditional(_) => {
                 match expression.extract_data() {
@@ -387,7 +392,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         })
     }
 
-    pub fn read_literal(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
+    pub fn read_literal(expression: &Expression, env: &Rc<Environment<R>>) -> Result<Value<R>> {
         match &expression.data {
             ExpressionBody::Primitive(primitive) => Self::eval_primitive(primitive),
             ExpressionBody::Identifier(name) => Ok(Value::Symbol(name.clone())),
@@ -433,7 +438,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
 
-    fn eval_primitive(datum: &Primitive) -> Result<Value<R, E>> {
+    fn eval_primitive(datum: &Primitive) -> Result<Value<R>> {
         Ok(match &datum {
             Primitive::Character(c) => Value::Character(*c),
             Primitive::String(string) => Value::String(string.clone()),
@@ -449,7 +454,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     fn try_expand_expression(
         procedure_expr: &Expression,
         arguments: &[Expression],
-        env: &Rc<E>,
+        env: &Rc<Environment<R>>,
     ) -> Result<Option<Expression>> {
         Ok(
             if let Value::Transformer(transformer) = Self::eval_expression(procedure_expr, env)? {
@@ -477,7 +482,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             },
         )
     }
-    pub fn eval_expression(expression: &Expression, env: &Rc<E>) -> Result<Value<R, E>> {
+    pub fn eval_expression(expression: &Expression, env: &Rc<Environment<R>>) -> Result<Value<R>> {
         Ok(match &expression.data {
             ExpressionBody::Primitive(datum) => Self::eval_primitive(datum)?,
             ExpressionBody::List(_) => {
@@ -491,7 +496,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
                 } else {
                     let procedure =
                         Self::eval_expression(procedure_expr, env)?.expect_procedure()?;
-                    let evaluated_args: Result<ArgVec<_, _>> = arguments
+                    let evaluated_args: Result<ArgVec<_>> = arguments
                         .into_iter()
                         .map(|arg| Self::eval_expression(arg, env))
                         .collect();
@@ -537,7 +542,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         })
     }
 
-    pub fn eval_import(&mut self, imports: &ImportDeclaration, env: Rc<E>) -> Result<()> {
+    pub fn eval_import(
+        &mut self,
+        imports: &ImportDeclaration,
+        env: Rc<Environment<R>>,
+    ) -> Result<()> {
         let mut definitions = HashMap::new();
         for import in &imports.0 {
             definitions.extend(self.eval_import_set(import)?.into_iter());
@@ -547,7 +556,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
         Ok(())
     }
-    fn file_library_factory(&self, name: &Located<LibraryName>) -> Result<LibraryFactory<R, E>> {
+    fn file_library_factory(&self, name: &Located<LibraryName>) -> Result<LibraryFactory<R>> {
         let base_directory = if let Some(program_directory) = &self.program_directory {
             program_directory.clone()
         } else {
@@ -567,7 +576,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             )
         }
     }
-    fn new_library(&mut self, factory: &LibraryFactory<R, E>) -> Result<Library<R, E>> {
+    fn new_library(&mut self, factory: &LibraryFactory<R>) -> Result<Library<R>> {
         match factory {
             LibraryFactory::Native(name, f) => Ok(Library::new(name.clone().into(), f())),
             LibraryFactory::AST(library_definition) => {
@@ -575,7 +584,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
             }
         }
     }
-    pub fn get_library(&mut self, name: Located<LibraryName>) -> Result<Library<R, E>> {
+    pub fn get_library(&mut self, name: Located<LibraryName>) -> Result<Library<R>> {
         let factory = match self.lib_loader.lib_factories.get(&name) {
             Some(factory) => factory,
             None => {
@@ -589,7 +598,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         .clone();
         self.new_library(&factory)
     }
-    pub fn eval_import_set(&mut self, import: &ImportSet) -> Result<Vec<(String, Value<R, E>)>> {
+    pub fn eval_import_set(&mut self, import: &ImportSet) -> Result<Vec<(String, Value<R>)>> {
         match &import.data {
             ImportSetBody::Direct(lib_name) => {
                 if self
@@ -650,8 +659,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn eval_expression_statement_or_definition(
         &mut self,
         statement: &Statement,
-        env: Rc<E>,
-    ) -> Result<Option<Value<R, E>>> {
+        env: Rc<Environment<R>>,
+    ) -> Result<Option<Value<R>>> {
         Ok(match statement {
             Statement::Expression(expr) => Some(Self::eval_expression(&expr, &env)?),
             Statement::Definition(Definition {
@@ -669,7 +678,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         })
     }
 
-    pub fn eval_ast(&mut self, ast: &Statement, env: Rc<E>) -> Result<Option<Value<R, E>>> {
+    pub fn eval_ast(
+        &mut self,
+        ast: &Statement,
+        env: Rc<Environment<R>>,
+    ) -> Result<Option<Value<R>>> {
         let ast_location = ast.location();
         match self.eval_ast_error_no_location(ast, env) {
             Ok(value) => Ok(value),
@@ -683,8 +696,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn eval_ast_error_no_location(
         &mut self,
         ast: &Statement,
-        env: Rc<E>,
-    ) -> Result<Option<Value<R, E>>> {
+        env: Rc<Environment<R>>,
+    ) -> Result<Option<Value<R>>> {
         if !self.import_end {
             Ok(match ast {
                 Statement::ImportDeclaration(imports) => {
@@ -709,18 +722,18 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
         }
     }
 
-    pub fn eval_root_ast(&mut self, ast: &Statement) -> Result<Option<Value<R, E>>> {
+    pub fn eval_root_ast(&mut self, ast: &Statement) -> Result<Option<Value<R>>> {
         self.eval_ast(ast, self.env.clone())
     }
 
     pub fn eval_library_definition<'a>(
         &mut self,
         library_definition: &LibraryDefinition,
-    ) -> Result<Library<R, E>> {
+    ) -> Result<Library<R>> {
         let name = library_definition.0.clone();
         let mut definitions = HashMap::new();
         let mut final_exports = Vec::new();
-        let lib_env = Rc::new(E::new());
+        let lib_env = Rc::new(Environment::new());
         for declaration in &library_definition.1 {
             match &declaration.data {
                 LibraryDeclaration::ImportDeclaration(imports) => {
@@ -751,19 +764,19 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
     pub fn eval_program<'a>(
         &mut self,
         asts: impl IntoIterator<Item = &'a Statement>,
-    ) -> Result<Option<Value<R, E>>> {
+    ) -> Result<Option<Value<R>>> {
         asts.into_iter()
             .try_fold(None, |_, ast| self.eval_root_ast(&ast))
     }
 
-    pub fn eval(&mut self, char_stream: impl Iterator<Item = char>) -> Result<Option<Value<R, E>>> {
+    pub fn eval(&mut self, char_stream: impl Iterator<Item = char>) -> Result<Option<Value<R>>> {
         {
             let lexer = Lexer::from_char_stream(char_stream);
             let mut parser = Parser::from_lexer(lexer);
             parser.try_fold(None, |_, statement| self.eval_root_ast(&statement?))
         }
     }
-    pub fn eval_file(&mut self, path: PathBuf) -> Result<Option<Value<R, E>>> {
+    pub fn eval_file(&mut self, path: PathBuf) -> Result<Option<Value<R>>> {
         self.program_directory = path.clone().parent().map(Path::to_owned);
         self.eval(file_char_stream(&path)?)
     }
@@ -771,7 +784,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Interpreter<R, E> {
 
 #[test]
 fn number() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let interpreter = Interpreter::<f32>::new_with_stdlib();
     assert_eq!(
         interpreter
             .eval_root_expression(ExpressionBody::Primitive(Primitive::Integer(-1)).into())?,
@@ -793,7 +806,7 @@ fn number() -> Result<()> {
 
 #[test]
 fn arithmetic() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let interpreter = Interpreter::<f32>::new_with_stdlib();
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::ProcedureCall(
@@ -937,7 +950,7 @@ fn arithmetic() -> Result<()> {
 
 #[test]
 fn undefined() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let interpreter = Interpreter::<f32>::new_with_stdlib();
 
     assert_eq!(
         interpreter.eval_root_expression(Expression::from(ExpressionBody::Identifier(
@@ -950,7 +963,7 @@ fn undefined() -> Result<()> {
 
 #[test]
 fn variable_definition() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
 
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
@@ -974,7 +987,7 @@ fn variable_definition() -> Result<()> {
 
 #[test]
 fn variable_assignment() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
 
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
@@ -998,7 +1011,7 @@ fn variable_assignment() -> Result<()> {
 
 #[test]
 fn builtin_procedural() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
 
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
@@ -1030,7 +1043,7 @@ fn builtin_procedural() -> Result<()> {
 
 #[test]
 fn procedure_definition() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
 
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
@@ -1067,7 +1080,7 @@ fn procedure_definition() -> Result<()> {
 
 #[test]
 fn procedure_debug() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
 
     let program = vec![Statement::Expression(simple_procedure(
         ParameterFormals(vec!["x".to_string(), "y".to_string()], None),
@@ -1088,7 +1101,7 @@ fn procedure_debug() -> Result<()> {
 
 #[test]
 fn lambda_call() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
 
     let program = vec![Statement::Expression(Expression::from(
         ExpressionBody::ProcedureCall(
@@ -1124,7 +1137,7 @@ fn lambda_call() -> Result<()> {
 
 #[test]
 fn closure() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
 
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
@@ -1190,7 +1203,7 @@ fn closure() -> Result<()> {
 }
 #[test]
 fn condition() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
 
     assert_eq!(
         interpreter.eval_program(
@@ -1223,7 +1236,7 @@ fn condition() -> Result<()> {
 
 #[test]
 fn local_environment() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
 
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
@@ -1261,7 +1274,7 @@ fn local_environment() -> Result<()> {
 
 #[test]
 fn procedure_as_data() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
 
     let program = vec![
         Statement::Definition(Definition::from(DefinitionBody(
@@ -1321,7 +1334,7 @@ fn eval_tail_expression() -> Result<()> {
         ExpressionBody::Primitive(Primitive::Integer(2)),
         ExpressionBody::Primitive(Primitive::Integer(5)),
     ]);
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let interpreter = Interpreter::<f32>::new_with_stdlib();
 
     {
         let expression = ExpressionBody::Primitive(Primitive::Integer(3)).into();
@@ -1407,7 +1420,7 @@ fn eval_tail_expression() -> Result<()> {
 
 #[test]
 fn datum_literal() -> Result<()> {
-    let interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let interpreter = Interpreter::<f32>::new();
 
     assert_eq!(
         Interpreter::eval_expression(
@@ -1469,7 +1482,7 @@ fn datum_literal() -> Result<()> {
 
 #[test]
 fn search_library() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
     {
         let library = interpreter.get_library(library_name!("scheme", "base").into())?;
         assert!(library
@@ -1507,7 +1520,7 @@ fn search_library() -> Result<()> {
 
 #[test]
 fn import_set() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
     interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
         || {
@@ -1558,7 +1571,7 @@ fn import_set() -> Result<()> {
 }
 #[test]
 fn import() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
     interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
         || {
@@ -1595,7 +1608,7 @@ fn import() -> Result<()> {
 
 #[test]
 fn library_definition() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
     interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
         || {
@@ -1713,7 +1726,7 @@ fn library_definition() -> Result<()> {
 
 #[test]
 fn import_cyclic() -> Result<()> {
-    let mut it = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut it = Interpreter::<f32>::new();
     it.register_library_factory(LibraryFactory::from_char_stream(
         &library_name!("foo"),
         "(define-library (foo) (import (foo)))".chars(),
@@ -1728,7 +1741,7 @@ fn import_cyclic() -> Result<()> {
 
 #[test]
 fn transformer() -> Result<()> {
-    let it = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let it = Interpreter::<f32>::new_with_stdlib();
     // transform to expression
     it.env.define(
         "foo".to_string(),
@@ -1788,14 +1801,14 @@ fn transformer() -> Result<()> {
 
 #[test]
 fn ast_location() -> Result<()> {
-    let mut interpreter = Interpreter::<f32, StandardEnv<f32>>::new();
+    let mut interpreter = Interpreter::<f32>::new();
     assert_eq!(
         interpreter
             .eval_ast(
                 &ExpressionBody::Identifier("foo".to_string())
                     .locate(Some([4, 6]))
                     .into(),
-                Rc::new(StandardEnv::new())
+                Rc::new(Environment::new())
             )
             .unwrap_err()
             .location,

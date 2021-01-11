@@ -438,15 +438,15 @@ fn number_exact() {
     );
 }
 
-pub type ArgVec<R, E> = SmallVec<[Value<R, E>; 4]>;
+pub type ArgVec<R> = SmallVec<[Value<R>; 4]>;
 
 #[derive(Clone, PartialEq)]
-pub enum BuiltinProcedurePointer<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    Pure(fn(ArgVec<R, E>) -> Result<Value<R, E>>),
-    Impure(fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>),
+pub enum BuiltinProcedurePointer<R: RealNumberInternalTrait> {
+    Pure(fn(ArgVec<R>) -> Result<Value<R>>),
+    Impure(fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>>),
 }
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuiltinProcedurePointer<R, E> {
-    pub fn apply(&self, args: ArgVec<R, E>, env: &Rc<E>) -> Result<Value<R, E>> {
+impl<R: RealNumberInternalTrait> BuiltinProcedurePointer<R> {
+    pub fn apply(&self, args: ArgVec<R>, env: &Rc<Environment<R>>) -> Result<Value<R>> {
         match &self {
             Self::Pure(pointer) => pointer(args),
             Self::Impure(pointer) => pointer(args, env.clone()),
@@ -454,30 +454,30 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> BuiltinProcedurePointer<R, 
     }
 }
 #[derive(Clone, PartialEq)]
-pub struct BuiltinProcedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+pub struct BuiltinProcedure<R: RealNumberInternalTrait> {
     pub name: &'static str,
     pub parameters: ParameterFormals,
-    pub pointer: BuiltinProcedurePointer<R, E>,
+    pub pointer: BuiltinProcedurePointer<R>,
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for BuiltinProcedure<R, E> {
+impl<R: RealNumberInternalTrait> Display for BuiltinProcedure<R> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "<build-in procedure ({})>", self.name)
     }
 }
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for BuiltinProcedure<R, E> {
+impl<R: RealNumberInternalTrait> Debug for BuiltinProcedure<R> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", self)
     }
 }
 
 #[derive(Clone)]
-pub enum Procedure<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    User(SchemeProcedure, Rc<E>),
-    Builtin(BuiltinProcedure<R, E>),
+pub enum Procedure<R: RealNumberInternalTrait> {
+    User(SchemeProcedure, Rc<Environment<R>>),
+    Builtin(BuiltinProcedure<R>),
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for Procedure<R, E> {
+impl<R: RealNumberInternalTrait> Debug for Procedure<R> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::User(p, _) => write!(f, "{:?}", p),
@@ -486,7 +486,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Debug for Procedure<R, E> {
     }
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for Procedure<R, E> {
+impl<R: RealNumberInternalTrait> PartialEq for Procedure<R> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::User(a, _), Self::User(b, _)) => a == b,
@@ -498,11 +498,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> PartialEq for Procedure<R, 
 
 impl ParameterFormals {}
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
+impl<R: RealNumberInternalTrait> Procedure<R> {
     pub fn new_builtin_pure(
         name: &'static str,
         parameters: ParameterFormals,
-        pointer: fn(ArgVec<R, E>) -> Result<Value<R, E>>,
+        pointer: fn(ArgVec<R>) -> Result<Value<R>>,
     ) -> Self {
         Self::Builtin(BuiltinProcedure {
             name,
@@ -513,7 +513,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
     pub fn new_builtin_impure(
         name: &'static str,
         parameters: ParameterFormals,
-        pointer: fn(ArgVec<R, E>, Rc<E>) -> Result<Value<R, E>>,
+        pointer: fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>>,
     ) -> Self {
         Self::Builtin(BuiltinProcedure {
             name,
@@ -529,7 +529,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Procedure<R, E> {
     }
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Procedure<R, E> {
+impl<R: RealNumberInternalTrait> Display for Procedure<R> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match &self {
             Procedure::User(procedure, ..) => write!(f, "{}", procedure),
@@ -604,20 +604,20 @@ macro_rules! match_expect_type {
 fn macro_match_expect_type() {
     assert_eq!(
         match_expect_type!(
-            Value::<f32, StandardEnv<_>>::Number(Number::Integer(5)),
+            Value::<f32>::Number(Number::Integer(5)),
             Value::Number(Number::Integer(i)) => i, Type::Integer
         ),
         Ok(5)
     );
     assert_eq!(
         match_expect_type!(
-            Value::<f32, StandardEnv<_>>::Number(Number::Integer(1)),
+            Value::<f32>::Number(Number::Integer(1)),
             Value::Number(Number::Integer(i)) => i + 3, Type::Integer),
         Ok(4)
     );
     assert_eq!(
         match_expect_type!(
-            Value::<f32, StandardEnv<_>>::Number(Number::Integer(5)),
+            Value::<f32>::Number(Number::Integer(5)),
             Value::String(s) => s, Type::String
         ),
         error!(LogicError::TypeMisMatch(5.to_string(), Type::String))
@@ -644,21 +644,21 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value<R: RealNumberInternalTrait, E: IEnvironment<R>> {
+pub enum Value<R: RealNumberInternalTrait> {
     Number(Number<R>),
     Boolean(bool),
     Character(char),
     String(String),
     Symbol(String),
-    Procedure(Procedure<R, E>),
-    Vector(ValueReference<Vec<Value<R, E>>>),
-    Pair(Box<Pair<R, E>>),
+    Procedure(Procedure<R>),
+    Vector(ValueReference<Vec<Value<R>>>),
+    Pair(Box<Pair<R>>),
     EmptyList,
     Void,
     Transformer(Transformer),
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
+impl<R: RealNumberInternalTrait> Value<R> {
     pub fn expect_number(self) -> Result<Number<R>> {
         match_expect_type!(self, Value::Number(number) => number, Type::Number)
     }
@@ -668,10 +668,10 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     pub fn expect_real(self) -> Result<R> {
         match_expect_type!(self, Value::Number(Number::Real(r)) => r, Type::Real)
     }
-    pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R, E>>>> {
+    pub fn expect_vector(self) -> Result<ValueReference<Vec<Value<R>>>> {
         match_expect_type!(self, Value::Vector(vector) => vector, Type::Vector)
     }
-    pub fn expect_list_or_pair(self) -> Result<Pair<R, E>> {
+    pub fn expect_list_or_pair(self) -> Result<Pair<R>> {
         match_expect_type!(self, Value::Pair(list) => *list, Type::Pair)
     }
     pub fn expect_string(self) -> Result<String> {
@@ -680,7 +680,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     pub fn expect_symbol(self) -> Result<String> {
         match_expect_type!(self, Value::Symbol(string) => string, Type::Symbol)
     }
-    pub fn expect_procedure(self) -> Result<Procedure<R, E>> {
+    pub fn expect_procedure(self) -> Result<Procedure<R>> {
         match_expect_type!(self, Value::Procedure(procedure) => procedure, Type::Procedure)
     }
     pub fn expect_boolean(self) -> Result<bool> {
@@ -691,7 +691,7 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Value<R, E> {
     }
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Value<R, E> {
+impl<R: RealNumberInternalTrait> Display for Value<R> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             Value::Number(num) => write!(f, "{}", num),

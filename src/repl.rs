@@ -1,5 +1,5 @@
 use crate::interpreter::Interpreter;
-use crate::{environment::*, values::Value};
+use crate::values::Value;
 use std::io;
 use std::io::Write;
 
@@ -23,7 +23,7 @@ fn check_bracket_closed(chars: impl Iterator<Item = char>) -> bool {
 
 pub fn run() {
     // currently rust is lack of higher kind type (HKT), so we need write f32 twice
-    let mut it = Interpreter::<f32, StandardEnv<f32>>::new_with_stdlib();
+    let mut it = Interpreter::<f32>::new_with_stdlib();
     let mut rl = Editor::<()>::new();
     io::stdout().flush().unwrap();
     let mut source = String::new();

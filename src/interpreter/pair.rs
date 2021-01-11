@@ -1,4 +1,4 @@
-use crate::{environment::IEnvironment, error::*, values::RealNumberInternalTrait, values::Value};
+use crate::{error::*, values::RealNumberInternalTrait, values::Value};
 use std::{fmt::Display, iter::FromIterator};
 
 use super::error::LogicError;
@@ -8,18 +8,18 @@ use super::error::LogicError;
 // r7rs 6.4. Pairs and lists
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Pair<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    pub car: Value<R, E>,
-    pub cdr: Value<R, E>,
+pub struct Pair<R: RealNumberInternalTrait> {
+    pub car: Value<R>,
+    pub cdr: Value<R>,
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Pair<R, E> {
-    pub fn new(car: Value<R, E>, cdr: Value<R, E>) -> Self {
+impl<R: RealNumberInternalTrait> Pair<R> {
+    pub fn new(car: Value<R>, cdr: Value<R>) -> Self {
         Self { car, cdr }
     }
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Pair<R, E> {
+impl<R: RealNumberInternalTrait> Display for Pair<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "({} ", self.car)?;
         let mut current_value = &self.cdr;
@@ -44,8 +44,8 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Display for Pair<R, E> {
     }
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> FromIterator<Value<R, E>> for Value<R, E> {
-    fn from_iter<I: IntoIterator<Item = Value<R, E>>>(iter: I) -> Self {
+impl<R: RealNumberInternalTrait> FromIterator<Value<R>> for Value<R> {
+    fn from_iter<I: IntoIterator<Item = Value<R>>>(iter: I) -> Self {
         let mut list = Value::EmptyList;
         for i in iter {
             list = Value::Pair(Box::new(Pair { car: i, cdr: list }));
@@ -54,11 +54,11 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> FromIterator<Value<R, E>> f
     }
 }
 
-pub struct PairIter<R: RealNumberInternalTrait, E: IEnvironment<R>> {
-    next: Option<Pair<R, E>>,
+pub struct PairIter<R: RealNumberInternalTrait> {
+    next: Option<Pair<R>>,
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Iterator for PairIter<R, E> {
+impl<R: RealNumberInternalTrait> Iterator for PairIter<R> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.next.take() {
             Some(next) => {
@@ -74,13 +74,13 @@ impl<R: RealNumberInternalTrait, E: IEnvironment<R>> Iterator for PairIter<R, E>
         }
     }
 
-    type Item = Result<Value<R, E>, SchemeError>;
+    type Item = Result<Value<R>, SchemeError>;
 }
 
-impl<R: RealNumberInternalTrait, E: IEnvironment<R>> IntoIterator for Pair<R, E> {
-    type Item = Result<Value<R, E>, SchemeError>;
+impl<R: RealNumberInternalTrait> IntoIterator for Pair<R> {
+    type Item = Result<Value<R>, SchemeError>;
 
-    type IntoIter = PairIter<R, E>;
+    type IntoIter = PairIter<R>;
 
     fn into_iter(self) -> Self::IntoIter {
         PairIter { next: Some(self) }
