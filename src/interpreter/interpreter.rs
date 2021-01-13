@@ -19,8 +19,8 @@ use super::library::LibraryName;
 use super::library::{native, Library};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
-pub enum LibraryFactory<R: RealNumberInternalTrait> {
-    Native(LibraryName, Box<dyn Fn() -> Vec<(String, Value<R>)>>),
+pub enum LibraryFactory<'a, R: RealNumberInternalTrait> {
+    Native(LibraryName, Box<dyn Fn() -> Vec<(String, Value<R>)> + 'a>),
     AST(Located<LibraryDefinition>),
 }
 #[test]
@@ -51,7 +51,7 @@ fn library_factory() -> Result<()> {
     Ok(())
 }
 
-impl<R: RealNumberInternalTrait> LibraryFactory<R> {
+impl<'a, R: RealNumberInternalTrait> LibraryFactory<'a, R> {
     pub fn get_library_name(&self) -> &LibraryName {
         match self {
             LibraryFactory::Native(name, _) => name,
@@ -98,23 +98,23 @@ impl<'a, R: RealNumberInternalTrait> TailCall<'a, R> {
         }
     }
 }
-pub struct LibraryLoader<R: RealNumberInternalTrait> {
-    lib_factories: HashMap<LibraryName, Rc<LibraryFactory<R>>>,
+pub struct LibraryLoader<'a, R: RealNumberInternalTrait> {
+    lib_factories: HashMap<LibraryName, Rc<LibraryFactory<'a, R>>>,
 }
 
-impl<R: RealNumberInternalTrait> LibraryLoader<R> {
+impl<'a, R: RealNumberInternalTrait> LibraryLoader<'a, R> {
     pub fn new() -> Self {
         Self {
             lib_factories: HashMap::new(),
         }
     }
-    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R>) {
+    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<'a, R>) {
         self.lib_factories.insert(
             library_factory.get_library_name().clone(),
             Rc::new(library_factory),
         );
     }
-    pub fn with_lib_factory(mut self, library_factory: LibraryFactory<R>) -> Self {
+    pub fn with_lib_factory(mut self, library_factory: LibraryFactory<'a, R>) -> Self {
         self.register_library_factory(library_factory);
         self
     }
@@ -148,16 +148,16 @@ impl<R: RealNumberInternalTrait> LibraryLoader<R> {
     }
 }
 
-pub struct Interpreter<R: RealNumberInternalTrait> {
+pub struct Interpreter<'a, R: RealNumberInternalTrait> {
     pub env: Rc<Environment<R>>,
-    lib_loader: LibraryLoader<R>,
+    lib_loader: LibraryLoader<'a, R>,
     imported_library: HashSet<LibraryName>,
     import_end: bool, // indicate program's import declaration part end
     pub program_directory: Option<PathBuf>,
     _marker: PhantomData<R>,
 }
 
-impl<R: RealNumberInternalTrait> Interpreter<R> {
+impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
     pub fn new() -> Self {
         let mut interpreter = Self {
             env: Rc::new(Environment::new()),
@@ -188,12 +188,12 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
     pub fn get_lib_loader(&self) -> &LibraryLoader<R> {
         &self.lib_loader
     }
-    pub fn append_lib_loader(&mut self, lib_loader: LibraryLoader<R>) {
+    pub fn append_lib_loader(&mut self, lib_loader: LibraryLoader<'a, R>) {
         self.lib_loader
             .lib_factories
             .extend(lib_loader.lib_factories.into_iter());
     }
-    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<R>) {
+    pub fn register_library_factory(&mut self, library_factory: LibraryFactory<'a, R>) {
         self.lib_loader.register_library_factory(library_factory);
     }
 
@@ -222,13 +222,13 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
         );
     }
 
-    fn apply_scheme_procedure<'a>(
+    fn apply_scheme_procedure<'b>(
         formals: &ParameterFormals,
         internal_definitions: &[Definition],
-        expressions: &'a [Expression],
+        expressions: &'b [Expression],
         closure: Rc<Environment<R>>,
         args: ArgVec<R>,
-    ) -> Result<TailExpressionResult<'a, R>> {
+    ) -> Result<TailExpressionResult<'b, R>> {
         let local_env = Rc::new(Environment::new_child(closure.clone()));
         let mut arg_iter = args.into_iter();
         for (param, arg) in formals.0.iter().zip(arg_iter.by_ref()) {
@@ -270,7 +270,7 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
         Ok((first.expect_procedure()?, evaluated_args_result))
     }
 
-    pub fn apply_procedure<'a>(
+    pub fn apply_procedure<'b>(
         initial_procedure: &Procedure<R>,
         mut args: ArgVec<R>,
         env: &Rc<Environment<R>>,
@@ -318,10 +318,10 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
         }
     }
 
-    fn eval_tail_expression<'a>(
-        expression: &'a Expression,
+    fn eval_tail_expression<'b>(
+        expression: &'b Expression,
         env: Rc<Environment<R>>,
-    ) -> Result<TailExpressionResult<'a, R>> {
+    ) -> Result<TailExpressionResult<'b, R>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
                 if let Some(expanded) =
@@ -353,10 +353,10 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
     }
     // during eval_tail_expression, some expression will expand to owned expression
     // it has to repeat this logic for owned expression, no other workaround
-    fn eval_owned_tail_expression<'a>(
+    fn eval_owned_tail_expression<'b>(
         expression: Expression,
         env: Rc<Environment<R>>,
-    ) -> Result<TailExpressionResult<'a, R>> {
+    ) -> Result<TailExpressionResult<'b, R>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(..) | ExpressionBody::Conditional(_) => {
                 match expression.extract_data() {
@@ -557,7 +557,7 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
         }
         Ok(())
     }
-    fn file_library_factory(&self, name: &Located<LibraryName>) -> Result<LibraryFactory<R>> {
+    fn file_library_factory(&self, name: &Located<LibraryName>) -> Result<LibraryFactory<'a, R>> {
         let base_directory = if let Some(program_directory) = &self.program_directory {
             program_directory.clone()
         } else {
@@ -727,7 +727,7 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
         self.eval_ast(ast, self.env.clone())
     }
 
-    pub fn eval_library_definition<'a>(
+    pub fn eval_library_definition<'b>(
         &mut self,
         library_definition: &LibraryDefinition,
     ) -> Result<Library<R>> {
@@ -762,9 +762,9 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
         }
         Ok(Library::new(name, definitions))
     }
-    pub fn eval_program<'a>(
+    pub fn eval_program<'b>(
         &mut self,
-        asts: impl IntoIterator<Item = &'a Statement>,
+        asts: impl IntoIterator<Item = &'b Statement>,
     ) -> Result<Option<Value<R>>> {
         asts.into_iter()
             .try_fold(None, |_, ast| self.eval_root_ast(&ast))
