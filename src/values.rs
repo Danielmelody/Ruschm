@@ -441,12 +441,12 @@ fn number_exact() {
 pub type ArgVec<R> = SmallVec<[Value<R>; 4]>;
 
 #[derive(Clone)]
-pub enum BuiltinProcedureBody<R: RealNumberInternalTrait> {
+pub enum BuiltinProcedureBody<'a, R: RealNumberInternalTrait> {
     Pure(fn(ArgVec<R>) -> Result<Value<R>>),
-    Impure(Rc<dyn Fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>>>),
+    Impure(Rc<dyn Fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>> + 'a>),
 }
 
-impl<R: RealNumberInternalTrait> PartialEq for BuiltinProcedureBody<R> {
+impl<'a, R: RealNumberInternalTrait> PartialEq for BuiltinProcedureBody<'a, R> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (BuiltinProcedureBody::Pure(fpa), BuiltinProcedureBody::Pure(fpb)) => fpa == fpb,
@@ -458,7 +458,7 @@ impl<R: RealNumberInternalTrait> PartialEq for BuiltinProcedureBody<R> {
     }
 }
 
-impl<R: RealNumberInternalTrait> BuiltinProcedureBody<R> {
+impl<'a, R: RealNumberInternalTrait> BuiltinProcedureBody<'a, R> {
     pub fn apply(&self, args: ArgVec<R>, env: &Rc<Environment<R>>) -> Result<Value<R>> {
         match &self {
             Self::Pure(pointer) => pointer(args),
@@ -467,30 +467,30 @@ impl<R: RealNumberInternalTrait> BuiltinProcedureBody<R> {
     }
 }
 #[derive(Clone, PartialEq)]
-pub struct BuiltinProcedure<R: RealNumberInternalTrait> {
+pub struct BuiltinProcedure<'a, R: RealNumberInternalTrait> {
     pub name: &'static str,
     pub parameters: ParameterFormals,
-    pub body: BuiltinProcedureBody<R>,
+    pub body: BuiltinProcedureBody<'a, R>,
 }
 
-impl<R: RealNumberInternalTrait> Display for BuiltinProcedure<R> {
+impl<'a, R: RealNumberInternalTrait> Display for BuiltinProcedure<'a, R> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "<build-in procedure ({})>", self.name)
     }
 }
-impl<R: RealNumberInternalTrait> Debug for BuiltinProcedure<R> {
+impl<'a, R: RealNumberInternalTrait> Debug for BuiltinProcedure<'a, R> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", self)
     }
 }
 
 #[derive(Clone)]
-pub enum Procedure<R: RealNumberInternalTrait> {
+pub enum Procedure<'a, R: RealNumberInternalTrait> {
     User(SchemeProcedure, Rc<Environment<R>>),
-    Builtin(BuiltinProcedure<R>),
+    Builtin(BuiltinProcedure<'a, R>),
 }
 
-impl<R: RealNumberInternalTrait> Debug for Procedure<R> {
+impl<'a, R: RealNumberInternalTrait> Debug for Procedure<'a, R> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::User(p, _) => write!(f, "{:?}", p),
@@ -499,7 +499,7 @@ impl<R: RealNumberInternalTrait> Debug for Procedure<R> {
     }
 }
 
-impl<R: RealNumberInternalTrait> PartialEq for Procedure<R> {
+impl<'a, R: RealNumberInternalTrait> PartialEq for Procedure<'a, R> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::User(a, _), Self::User(b, _)) => a == b,
@@ -511,7 +511,7 @@ impl<R: RealNumberInternalTrait> PartialEq for Procedure<R> {
 
 impl ParameterFormals {}
 
-impl<R: RealNumberInternalTrait> Procedure<R> {
+impl<'a, R: RealNumberInternalTrait> Procedure<'a, R> {
     pub fn new_builtin_pure(
         name: &'static str,
         parameters: ParameterFormals,
@@ -542,7 +542,7 @@ impl<R: RealNumberInternalTrait> Procedure<R> {
     }
 }
 
-impl<R: RealNumberInternalTrait> Display for Procedure<R> {
+impl<'a, R: RealNumberInternalTrait> Display for Procedure<'a, R> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match &self {
             Procedure::User(procedure, ..) => write!(f, "{}", procedure),
@@ -657,13 +657,13 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value<R: RealNumberInternalTrait> {
+pub enum Value<'a, R: RealNumberInternalTrait> {
     Number(Number<R>),
     Boolean(bool),
     Character(char),
     String(String),
     Symbol(String),
-    Procedure(Procedure<R>),
+    Procedure(Procedure<'a, R>),
     Vector(ValueReference<Vec<Value<R>>>),
     Pair(Box<Pair<R>>),
     EmptyList,
@@ -671,7 +671,7 @@ pub enum Value<R: RealNumberInternalTrait> {
     Transformer(Transformer),
 }
 
-impl<R: RealNumberInternalTrait> Value<R> {
+impl<'a, R: RealNumberInternalTrait> Value<'a, R> {
     pub fn expect_number(self) -> Result<Number<R>> {
         match_expect_type!(self, Value::Number(number) => number, Type::Number)
     }

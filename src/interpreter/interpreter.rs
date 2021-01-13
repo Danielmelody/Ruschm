@@ -261,7 +261,7 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
         procedure_expr: &Expression,
         arguments: &[Expression],
         env: &Rc<Environment<R>>,
-    ) -> Result<(Procedure<R>, ArgVec<R>)> {
+    ) -> Result<(Procedure<'a, R>, ArgVec<R>)> {
         let first = Self::eval_expression(procedure_expr, env)?;
         let evaluated_args_result = arguments
             .iter()
@@ -271,7 +271,7 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
     }
 
     pub fn apply_procedure<'b>(
-        initial_procedure: &Procedure<R>,
+        initial_procedure: &Procedure<'a, R>,
         mut args: ArgVec<R>,
         env: &Rc<Environment<R>>,
     ) -> Result<Value<R>> {

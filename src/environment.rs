@@ -9,29 +9,29 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::rc::Rc;
 
-pub type DefinitionIter<'a, R> = Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R>)>>;
+pub type DefinitionIter<'a, R> = Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<'a, R>)>>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Environment<R: RealNumberInternalTrait> {
-    parent: Option<Rc<Environment<R>>>,
-    definitions: RefCell<HashMap<String, Value<R>>>,
+pub struct Environment<'a, R: RealNumberInternalTrait> {
+    parent: Option<Rc<Environment<'a, R>>>,
+    definitions: RefCell<HashMap<String, Value<'a, R>>>,
 }
 
-impl<R: RealNumberInternalTrait> Environment<R> {
+impl<'a, R: RealNumberInternalTrait> Environment<'a, R> {
     pub fn new() -> Self {
         Self {
             parent: None,
             definitions: RefCell::new(HashMap::new()),
         }
     }
-    pub fn new_child(parent: Rc<Environment<R>>) -> Self {
+    pub fn new_child(parent: Rc<Environment<'a, R>>) -> Self {
         Self {
             parent: Some(parent),
             definitions: RefCell::new(HashMap::new()),
         }
     }
 
-    pub fn define(&self, name: String, value: Value<R>) {
+    pub fn define(&self, name: String, value: Value<'a, R>) {
         self.definitions.borrow_mut().insert(name, value);
     }
 

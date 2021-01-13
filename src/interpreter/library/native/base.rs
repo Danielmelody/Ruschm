@@ -15,7 +15,6 @@ fn apply<R: RealNumberInternalTrait>(
     let mut args = iter.collect::<ArgVec<R>>();
     if !args.is_empty() {
         let extended = args.pop().unwrap();
-
         let extended = match extended {
             Value::Pair(p) => p.into_iter().collect::<Result<ArgVec<R>>>()?,
             Value::EmptyList => ArgVec::new(),
