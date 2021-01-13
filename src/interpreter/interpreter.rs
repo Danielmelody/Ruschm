@@ -20,15 +20,16 @@ use super::library::{native, Library};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
 pub enum LibraryFactory<R: RealNumberInternalTrait> {
-    Native(LibraryName, fn() -> Vec<(String, Value<R>)>),
+    Native(LibraryName, Box<dyn Fn() -> Vec<(String, Value<R>)>>),
     AST(Located<LibraryDefinition>),
 }
 #[test]
 fn library_factory() -> Result<()> {
     let mut it = Interpreter::<f32>::new();
-    it.register_library_factory(LibraryFactory::Native(library_name!("foo"), || {
-        vec![("a".to_string(), Value::Void)]
-    }));
+    it.register_library_factory(LibraryFactory::Native(
+        library_name!("foo"),
+        Box::new(|| vec![("a".to_string(), Value::Void)]),
+    ));
     assert_eq!(
         it.get_library(library_name!("foo").into()),
         Ok(Library::new(
@@ -125,12 +126,12 @@ impl<R: RealNumberInternalTrait> LibraryLoader<R> {
     /// use ruschm::interpreter::{LibraryLoader, LibraryFactory, library::LibraryName};
     /// use std::collections::HashSet;
     /// let library_loader = LibraryLoader::<f32>::new()
-    ///     .with_lib_factory(LibraryFactory::Native(library_name!("foo"), || vec![]))
+    ///     .with_lib_factory(LibraryFactory::Native(library_name!("foo"), Box::new(|| vec![])))
     ///     .with_lib_factory(LibraryFactory::Native(
     ///         library_name!("foo", "bar"),
-    ///         || vec![],
+    ///         Box::new(|| vec![]),
     ///     ))
-    ///     .with_lib_factory(LibraryFactory::Native(library_name!(0, "a"), || vec![]));
+    ///     .with_lib_factory(LibraryFactory::Native(library_name!(0, "a"), Box::new(|| vec![])));
     /// assert_eq!(
     ///     library_loader.iter_library_names().collect::<HashSet<_>>(),
     ///     vec![
@@ -199,11 +200,11 @@ impl<R: RealNumberInternalTrait> Interpreter<R> {
     fn register_stdlib_factories(&mut self) {
         self.register_library_factory(LibraryFactory::Native(
             library_name!("ruschm", "base"),
-            native::base::library_map,
+            Box::new(native::base::library_map),
         ));
         self.register_library_factory(LibraryFactory::Native(
             library_name!("ruschm", "write"),
-            native::write::library_map,
+            Box::new(native::write::library_map),
         ));
         self.register_library_factory(
             LibraryFactory::from_char_stream(
@@ -1500,10 +1501,10 @@ fn search_library() -> Result<()> {
             )))
         );
     }
-    let lib_not_exist_factory =
-        LibraryFactory::Native(library_name!("lib", "not", "exist"), || {
-            vec![("a".to_string(), Value::Boolean(false))]
-        });
+    let lib_not_exist_factory = LibraryFactory::Native(
+        library_name!("lib", "not", "exist"),
+        Box::new(|| vec![("a".to_string(), Value::Boolean(false))]),
+    );
     // exist now
     interpreter.register_library_factory(lib_not_exist_factory);
     {
@@ -1523,12 +1524,12 @@ fn import_set() -> Result<()> {
     let mut interpreter = Interpreter::<f32>::new();
     interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
-        || {
+        Box::new(|| {
             vec![
                 ("a".to_string(), Value::String("father".to_string())),
                 ("b".to_string(), Value::String("bob".to_string())),
             ]
-        },
+        }),
     ));
     let direct = ImportSetBody::Direct(library_name!("foo", "bar").into());
     {
@@ -1574,12 +1575,12 @@ fn import() -> Result<()> {
     let mut interpreter = Interpreter::<f32>::new();
     interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
-        || {
+        Box::new(|| {
             vec![
                 ("a".to_string(), Value::String("father".to_string())),
                 ("b".to_string(), Value::String("bob".to_string())),
             ]
-        },
+        }),
     ));
     let import_declaration = ImportDeclaration(vec![
         ImportSetBody::Only(
@@ -1611,12 +1612,12 @@ fn library_definition() -> Result<()> {
     let mut interpreter = Interpreter::<f32>::new();
     interpreter.register_library_factory(LibraryFactory::Native(
         library_name!("foo", "bar").into(),
-        || {
+        Box::new(|| {
             vec![
                 ("a".to_string(), Value::String("father".to_string())),
                 ("b".to_string(), Value::String("bob".to_string())),
             ]
-        },
+        }),
     ));
     {
         // empty library
