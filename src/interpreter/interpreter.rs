@@ -164,15 +164,7 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
 
     pub fn new_with_stdlib() -> Self {
         let mut interpreter = Interpreter::<R>::new();
-        interpreter
-            .eval_import(
-                &ImportDeclaration(vec![
-                    import_library_direct!("scheme", "base"),
-                    import_library_direct!("scheme", "write"),
-                ]),
-                interpreter.env.clone(),
-            )
-            .unwrap();
+        interpreter.import_stdlib();
         interpreter
     }
 
@@ -187,6 +179,17 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
         };
         interpreter.register_stdlib_factories();
         interpreter
+    }
+
+    pub fn import_stdlib(&mut self) {
+        self.eval_import(
+            &ImportDeclaration(vec![
+                import_library_direct!("scheme", "base"),
+                import_library_direct!("scheme", "write"),
+            ]),
+            self.env.clone(),
+        )
+        .unwrap();
     }
 
     pub fn get_lib_loader(&self) -> &LibraryLoader<R> {
