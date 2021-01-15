@@ -159,16 +159,7 @@ pub struct Interpreter<'a, R: RealNumberInternalTrait> {
 
 impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
     pub fn new() -> Self {
-        let mut interpreter = Self {
-            env: Rc::new(Environment::new()),
-            lib_loader: LibraryLoader::new(),
-            imported_library: HashSet::new(),
-            import_end: false,
-            program_directory: None,
-            _marker: PhantomData,
-        };
-        interpreter.register_stdlib_factories();
-        interpreter
+        Self::with_environment(Rc::new(Environment::new()))
     }
 
     pub fn new_with_stdlib() -> Self {
@@ -182,6 +173,19 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
                 interpreter.env.clone(),
             )
             .unwrap();
+        interpreter
+    }
+
+    pub fn with_environment(environment: Rc<Environment<R>>) -> Self {
+        let mut interpreter = Self {
+            env: environment,
+            lib_loader: LibraryLoader::new(),
+            imported_library: HashSet::new(),
+            import_end: false,
+            program_directory: None,
+            _marker: PhantomData,
+        };
+        interpreter.register_stdlib_factories();
         interpreter
     }
 
