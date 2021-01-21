@@ -1,6 +1,5 @@
 #[cfg(test)]
 use crate::interpreter::Interpreter;
-use crate::values::RealNumberInternalTrait;
 use crate::values::Value;
 use crate::{error::*, interpreter::error::LogicError};
 use cell::{Ref, RefCell, RefMut, RefVal};
@@ -9,33 +8,33 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::rc::Rc;
 
-pub type DefinitionIter<'a, R> = Box<dyn 'a + Iterator<Item = (&'a String, &'a Value<R>)>>;
+pub type DefinitionIter<'a, V> = Box<dyn 'a + Iterator<Item = (&'a String, &'a V)>>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Environment<R: RealNumberInternalTrait> {
-    parent: Option<Rc<Environment<R>>>,
-    definitions: RefCell<HashMap<String, Value<R>>>,
+pub struct LexicalScope<V> {
+    parent: Option<Rc<LexicalScope<V>>>,
+    definitions: RefCell<HashMap<String, V>>,
 }
 
-impl<R: RealNumberInternalTrait> Environment<R> {
+impl<V> LexicalScope<V> {
     pub fn new() -> Self {
         Self {
             parent: None,
             definitions: RefCell::new(HashMap::new()),
         }
     }
-    pub fn new_child(parent: Rc<Environment<R>>) -> Self {
+    pub fn new_child(parent: Rc<LexicalScope<V>>) -> Self {
         Self {
             parent: Some(parent),
             definitions: RefCell::new(HashMap::new()),
         }
     }
 
-    pub fn define(&self, name: String, value: Value<R>) {
+    pub fn define(&self, name: String, value: V) {
         self.definitions.borrow_mut().insert(name, value);
     }
 
-    pub fn get(&self, name: &str) -> Option<Ref<Value<R>>> {
+    pub fn get(&self, name: &str) -> Option<Ref<V>> {
         if self.definitions.borrow().contains_key(name) {
             Some(Ref::map(self.definitions.borrow(), |definitions| {
                 definitions.get(name).unwrap()
@@ -47,7 +46,7 @@ impl<R: RealNumberInternalTrait> Environment<R> {
             }
         }
     }
-    pub fn get_mut(&self, name: &str) -> Option<RefMut<Value<R>>> {
+    pub fn get_mut(&self, name: &str) -> Option<RefMut<V>> {
         if self.definitions.borrow().contains_key(name) {
             Some(RefMut::map(self.definitions.borrow_mut(), |definitions| {
                 definitions.get_mut(name).unwrap()
@@ -60,7 +59,7 @@ impl<R: RealNumberInternalTrait> Environment<R> {
         }
     }
 
-    pub fn set(&self, name: &str, value: Value<R>) -> Result<(), SchemeError> {
+    pub fn set(&self, name: &str, value: V) -> Result<(), SchemeError> {
         match self.definitions.borrow_mut().get_mut(name) {
             None => match &self.parent {
                 None => {
@@ -75,13 +74,15 @@ impl<R: RealNumberInternalTrait> Environment<R> {
         Ok(())
     }
 
-    pub fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, R>> {
+    pub fn iter_local_definitions<'a, 'b: 'a>(&'b self) -> RefVal<'a, DefinitionIter<'b, V>> {
         Ref::map_val(
             self.definitions.borrow(),
-            |definitions| -> DefinitionIter<'b, R> { Box::new(definitions.iter()) },
+            |definitions| -> DefinitionIter<'b, V> { Box::new(definitions.iter()) },
         )
     }
 }
+
+pub type Environment<R> = LexicalScope<Value<R>>;
 
 #[test]
 fn iter_envs() -> Result<(), Box<dyn std::error::Error>> {
