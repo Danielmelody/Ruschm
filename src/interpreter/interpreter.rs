@@ -3,8 +3,8 @@
 #[cfg(test)]
 use crate::values::{Transformer, Type};
 use crate::{
-    environment::*, library_name, values::BuiltinProcedure, values::Number,
-    values::RealNumberInternalTrait, values::ValueReference,
+    environment::*, library_factory::GenericLibraryFactory, library_name, values::BuiltinProcedure,
+    values::Number, values::RealNumberInternalTrait, values::ValueReference,
 };
 use crate::{error::*, values::Value};
 use crate::{file::file_char_stream, values::ArgVec};
@@ -19,10 +19,7 @@ use super::library::LibraryName;
 use super::library::{native, Library};
 use super::Result;
 use super::{error::LogicError, pair::Pair};
-pub enum LibraryFactory<'a, R: RealNumberInternalTrait> {
-    Native(LibraryName, Box<dyn Fn() -> Vec<(String, Value<R>)> + 'a>),
-    AST(Located<LibraryDefinition>),
-}
+pub type LibraryFactory<'a, R> = GenericLibraryFactory<'a, Value<R>>;
 #[test]
 fn library_factory() -> Result<()> {
     let mut it = Interpreter::<f32>::new();
@@ -49,30 +46,6 @@ fn library_factory() -> Result<()> {
         ))
     );
     Ok(())
-}
-
-impl<'a, R: RealNumberInternalTrait> LibraryFactory<'a, R> {
-    pub fn get_library_name(&self) -> &LibraryName {
-        match self {
-            LibraryFactory::Native(name, _) => name,
-            LibraryFactory::AST(library_definition) => &library_definition.0,
-        }
-    }
-    pub fn from_char_stream(
-        expect_library_name: &LibraryName,
-        char_stream: impl Iterator<Item = char>,
-    ) -> Result<Self> {
-        let lexer = Lexer::from_char_stream(char_stream);
-        let parser = Parser::from_lexer(lexer);
-        for statement in parser {
-            if let Statement::LibraryDefinition(library_definition) = statement? {
-                if library_definition.0.deref() == expect_library_name {
-                    return Ok(Self::AST(library_definition));
-                }
-            }
-        }
-        error!(LogicError::LibraryNotFound(expect_library_name.clone()))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
