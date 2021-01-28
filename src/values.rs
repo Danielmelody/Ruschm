@@ -468,7 +468,7 @@ impl<R: RealNumberInternalTrait> BuiltinProcedureBody<R> {
 }
 #[derive(Clone, PartialEq)]
 pub struct BuiltinProcedure<R: RealNumberInternalTrait> {
-    pub name: &'static str,
+    pub name: String,
     pub parameters: ParameterFormals,
     pub body: BuiltinProcedureBody<R>,
 }
@@ -513,7 +513,7 @@ impl ParameterFormals {}
 
 impl<R: RealNumberInternalTrait> Procedure<R> {
     pub fn new_builtin_pure(
-        name: &'static str,
+        name: String,
         parameters: ParameterFormals,
         function: fn(ArgVec<R>) -> Result<Value<R>>,
     ) -> Self {
@@ -524,7 +524,7 @@ impl<R: RealNumberInternalTrait> Procedure<R> {
         })
     }
     pub fn new_builtin_impure(
-        name: &'static str,
+        name: String,
         parameters: ParameterFormals,
         pointer: impl Fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>> + 'static,
     ) -> Self {
