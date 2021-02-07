@@ -190,6 +190,14 @@ impl<R: RealNumberInternalTrait> std::ops::Div<Number<R>> for Number<R> {
 }
 
 impl<R: RealNumberInternalTrait> Number<R> {
+    pub fn abs(self) -> Number<R> {
+        match self {
+            Number::Integer(num) => Number::Integer(num.abs()),
+            Number::Real(num) => Number::Real(num.abs()),
+            Number::Rational(a, b) => Number::Rational(a.abs(), b.abs()),
+        }
+    }
+
     fn as_real(self) -> R {
         match self {
             Number::Integer(num) => R::from(num).unwrap(),

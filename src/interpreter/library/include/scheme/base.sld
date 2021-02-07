@@ -2,7 +2,7 @@
     (import (ruschm base))
     (export apply car cdr eqv? eq? cons boolean? char? number? string? symbol? pair? procedure? vector? boolean=? not
         + - * / = < <= > >=
-        min max sqrt exp ln log sin cos tan asin acos atan atan2 floor ceiling exact floor-quotient floor-remainder newline vector make-vector
+        abs min max sqrt exp ln log sin cos tan asin acos atan atan2 floor ceiling exact floor-quotient floor-remainder newline vector make-vector
         vector-length vector-ref vector-set!
         caar cadr cdar cddr caaar caadr cadar caddr cdaar cdadr cddar cdddr
         list make-list null? append

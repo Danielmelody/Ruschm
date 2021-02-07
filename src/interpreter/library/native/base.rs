@@ -302,6 +302,7 @@ macro_rules! numeric_one_argument {
     };
 }
 
+numeric_one_argument!(abs);
 numeric_one_argument!(sqrt);
 numeric_one_argument!(exp);
 numeric_one_argument!(ln);
@@ -797,6 +798,7 @@ pub fn library_map<R: RealNumberInternalTrait>() -> Vec<(String, Value<R>)> {
         pure_function_mapping!(">=", vec![], Some("x".to_string()), greater_equal),
         pure_function_mapping!("min", vec!["x1".to_string()], Some("x".to_string()), min),
         pure_function_mapping!("max", vec!["x1".to_string()], Some("x".to_string()), max),
+        pure_function_mapping!("abs", vec!["x".to_string()], None, abs),
         pure_function_mapping!("sqrt", vec!["x".to_string()], None, sqrt),
         pure_function_mapping!("exp", vec!["z".to_string()], None, exp),
         pure_function_mapping!("ln", vec!["z".to_string()], None, ln),
