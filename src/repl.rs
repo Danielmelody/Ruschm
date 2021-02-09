@@ -23,7 +23,11 @@ fn check_bracket_closed(chars: impl Iterator<Item = char>) -> bool {
 
 pub fn run() {
     // currently rust is lack of higher kind type (HKT), so we need write f32 twice
-    let mut it = Interpreter::<f32>::new_with_stdlib();
+    let it = Interpreter::<f32>::new_with_stdlib();
+    run_with_interpreter(it);
+}
+
+pub fn run_with_interpreter(mut it: Interpreter<f32>) {
     let mut rl = Editor::<()>::new();
     io::stdout().flush().unwrap();
     let mut source = String::new();
