@@ -187,6 +187,15 @@ pub struct SchemeProcedure(
     pub Vec<Expression>,
 );
 
+impl SchemeProcedure {
+    pub fn get_body_location(&self) -> Option<[u32; 2]> {
+        let SchemeProcedure(_, defs, exprs) = self;
+        defs.first()
+            .and_then(|d| d.location)
+            .or(exprs.first().and_then(|e| e.location))
+    }
+}
+
 impl fmt::Display for SchemeProcedure {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let SchemeProcedure(formals, ..) = self;
