@@ -8,7 +8,7 @@ use fmt::Display;
 use crate::{interpreter::error::LogicError, parser::error::SyntaxError};
 
 #[derive(Debug, Clone, Copy)]
-pub struct Located<T: PartialEq> {
+pub struct Located<T> {
     pub data: T,
     pub location: Option<[u32; 2]>,
 }
@@ -16,7 +16,7 @@ pub struct Located<T: PartialEq> {
 pub trait ToLocated {
     fn locate(self, location: Option<[u32; 2]>) -> Located<Self>
     where
-        Self: Sized + PartialEq,
+        Self: Sized,
     {
         Located::<Self> {
             data: self,
@@ -26,7 +26,7 @@ pub trait ToLocated {
 
     fn no_locate(self) -> Located<Self>
     where
-        Self: Sized + PartialEq,
+        Self: Sized,
     {
         Located::<Self> {
             data: self,
@@ -34,13 +34,13 @@ pub trait ToLocated {
         }
     }
 }
-impl<T: PartialEq> Located<T> {
+impl<T> Located<T> {
     pub fn extract_data(self) -> T {
         self.data
     }
 }
 
-impl<T: PartialEq> From<T> for Located<T> {
+impl<T> From<T> for Located<T> {
     fn from(data: T) -> Self {
         Self {
             data,
@@ -55,20 +55,20 @@ impl<T: PartialEq> PartialEq for Located<T> {
     }
 }
 
-impl<T: PartialEq + Display> Display for Located<T> {
+impl<T: Display> Display for Located<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.data.fmt(f)
     }
 }
 
-impl<T: PartialEq> Deref for Located<T> {
+impl<T> Deref for Located<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         &self.data
     }
 }
-impl<T: PartialEq> DerefMut for Located<T> {
+impl<T> DerefMut for Located<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.data
     }
@@ -105,7 +105,7 @@ impl Error for SchemeError {
 }
 
 #[cfg(test)]
-pub(crate) fn convert_located<T: PartialEq>(datas: Vec<T>) -> Vec<Located<T>> {
+pub(crate) fn convert_located<T>(datas: Vec<T>) -> Vec<Located<T>> {
     datas.into_iter().map(|d| Located::from(d)).collect()
 }
 
