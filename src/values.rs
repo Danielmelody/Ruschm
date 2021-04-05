@@ -20,7 +20,7 @@ use crate::{
     parser::SchemeProcedure,
     parser::{
         pair::{GenericPair, Pairable},
-        Expression, Statement,
+        Transformer,
     },
 };
 
@@ -646,30 +646,6 @@ fn macro_match_expect_type() {
         ),
         error!(LogicError::TypeMisMatch(5.to_string(), Type::String))
     );
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Transformer {
-    Native(fn(SmallVec<[Expression; 4]>) -> Result<Vec<Statement>>),
-}
-
-impl Display for Transformer {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Transformer::Native(_) => write!(f, "<build-in transformer>"),
-        }
-    }
-}
-
-impl Transformer {
-    pub fn transform(
-        &self,
-        expression_arguments: impl IntoIterator<Item = Expression>,
-    ) -> Result<Vec<Statement>> {
-        match self {
-            Transformer::Native(f) => f(expression_arguments.into_iter().collect()),
-        }
-    }
 }
 
 // TODO: using enum as type when RFC 1450 is stable

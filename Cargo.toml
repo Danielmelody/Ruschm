@@ -22,11 +22,12 @@ exclude = [
 crate-type = ["lib"]
 
 [dependencies]
-rustyline = "6.3.0"
-smallvec = "1.4.1"
-num-traits = "0.2"
-itertools = "0.9.0"
-termcolor = "1.1.0"
+rustyline = "8.0.0"
+smallvec = "1.6.1"
+num-traits = "0.2.14"
+itertools = "0.10.0"
+termcolor = "1.1.2"
 cell = "0.1.8"
-thiserror = "1.0.22"
+thiserror = "1.0.24"
 either = "1.6.1"
+boolinator = "2.4.0"

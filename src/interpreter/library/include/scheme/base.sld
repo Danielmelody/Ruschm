@@ -89,13 +89,12 @@
         (define (atom? x)
         (not (pair? x)))
 
-        ; `cond` requires macro system
         ;;;;	memq
-        ; (define (memq obj lst)
-        ;   (cond
-        ;     ((null? lst) #f)
-        ;     ((eq? obj (car lst)) lst)
-        ;     (else (memq obj (cdr lst)))))
+        (define (memq obj lst)
+          (cond
+            ((null? lst) #f)
+            ((eq? obj (car lst)) lst)
+            (else (memq obj (cdr lst)))))
 
         ;;;;    equal?
         (define (equal? x y)

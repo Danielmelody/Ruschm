@@ -1,4 +1,4 @@
-use super::{Datum, DefinitionBody, TokenData};
+use super::{Datum, DefinitionBody, SyntaxPattern, SyntaxTemplate, TokenData};
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq, Clone)]
@@ -11,6 +11,10 @@ pub enum SyntaxError {
     UnexpectedToken(TokenData),
     #[error("unexpected datum {0}")]
     UnexpectedDatum(Datum),
+    #[error("unexpected pattern {0}")]
+    UnexpectedPattern(SyntaxPattern),
+    #[error("unexpected template {0}")]
+    UnexpectedTemplate(SyntaxTemplate),
     #[error("unexpect end of input")]
     UnexpectedEnd,
     #[error("unrecognized token")]
@@ -43,6 +47,12 @@ pub enum SyntaxError {
     IllegalDefinition,
     #[error("invalid context for definition {0:?}")]
     InvalidDefinitionContext(DefinitionBody),
+    #[error("{1} is not matched to any pattern of macro {0}")]
+    MacroMissMatch(String, Datum),
+    #[error("keyword should be {0} instead of {1}")]
+    MacroKeywordMissMatch(String, String),
+    #[error("multiple expression should be packed by (begin ...)")]
+    TransformOutMultipleDatum,
     #[error("{0}")]
     Extension(String),
 }
