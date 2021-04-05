@@ -322,17 +322,11 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
     ) -> Result<TailExpressionResult<'b, R>> {
         Ok(match &expression.data {
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
-                if let Some(expanded) =
-                    Self::try_expand_expression(procedure_expr, arguments, &env)?
-                {
-                    Self::eval_owned_tail_expression(expanded, env)?
-                } else {
-                    TailExpressionResult::TailCall(TailCall::Ref(
-                        procedure_expr.as_ref(),
-                        arguments,
-                        env,
-                    ))
-                }
+                TailExpressionResult::TailCall(TailCall::Ref(
+                    procedure_expr.as_ref(),
+                    arguments,
+                    env,
+                ))
             }
             ExpressionBody::Conditional(cond) => {
                 let (test, consequent, alternative) = cond.as_ref();
@@ -359,18 +353,12 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
             ExpressionBody::ProcedureCall(..) | ExpressionBody::Conditional(_) => {
                 match expression.extract_data() {
                     ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
-                        if let Some(expanded) =
-                            Self::try_expand_expression(procedure_expr.as_ref(), &arguments, &env)?
-                        {
-                            Self::eval_owned_tail_expression(expanded, env)?
-                        } else {
-                            TailExpressionResult::TailCall(TailCall::Owned(
-                                *procedure_expr,
-                                arguments,
-                                env,
-                                PhantomData,
-                            ))
-                        }
+                        TailExpressionResult::TailCall(TailCall::Owned(
+                            *procedure_expr,
+                            arguments,
+                            env,
+                            PhantomData,
+                        ))
                     }
                     ExpressionBody::Conditional(cond) => {
                         let (test, consequent, alternative) = *cond;
@@ -418,64 +406,26 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
             Primitive::Rational(a, b) => Value::Number(Number::Rational(*a, *b as i32)),
         })
     }
-    fn try_expand_expression(
-        procedure_expr: &Expression,
-        arguments: &[Expression],
-        env: &Rc<Environment<R>>,
-    ) -> Result<Option<Expression>> {
-        Ok(
-            if let Value::Transformer(transformer) = Self::eval_expression(procedure_expr, env)? {
-                Some({
-                    let location = procedure_expr.location;
-                    let mut transformed = transformer
-                        .transform(arguments.iter().cloned().collect::<Vec<_>>())?
-                        .into_iter();
-                    let expression = if let Some(statement) = transformed.next() {
-                        statement.expect_expression()?
-                    } else {
-                        return located_error!(
-                            SyntaxError::ExpectSomething(
-                                "expression".to_string(),
-                                "None".to_string()
-                            ),
-                            location
-                        );
-                    };
 
-                    if transformed.next().is_some() {
-                        panic!("transformer expand to multiple statements unsupported")
-                    }
-                    expression
-                })
-            } else {
-                None
-            },
-        )
-    }
     pub fn eval_expression(expression: &Expression, env: &Rc<Environment<R>>) -> Result<Value<R>> {
         Ok(match &expression.data {
             ExpressionBody::Primitive(datum) => Self::eval_primitive(datum)?,
             ExpressionBody::Datum(datum) => Self::read_literal(datum, env)?,
             ExpressionBody::ProcedureCall(procedure_expr, arguments) => {
-                if let Some(expanded) = Self::try_expand_expression(procedure_expr, arguments, env)?
-                {
-                    Self::eval_expression(&expanded, env)?
-                } else {
-                    let first = Self::eval_expression(procedure_expr, env)?;
-                    let evaluated_args: Result<ArgVec<_>> = arguments
-                        .into_iter()
-                        .map(|arg| Self::eval_expression(arg, env))
-                        .collect();
-                    match first {
-                        Value::Procedure(procedure) => {
-                            Self::apply_procedure(&procedure, evaluated_args?, env)?
-                        }
-                        other => {
-                            return located_error!(
-                                LogicError::TypeMisMatch(other.to_string(), Type::Procedure),
-                                procedure_expr.location
-                            )
-                        }
+                let first = Self::eval_expression(procedure_expr, env)?;
+                let evaluated_args: Result<ArgVec<_>> = arguments
+                    .into_iter()
+                    .map(|arg| Self::eval_expression(arg, env))
+                    .collect();
+                match first {
+                    Value::Procedure(procedure) => {
+                        Self::apply_procedure(&procedure, evaluated_args?, env)?
+                    }
+                    other => {
+                        return located_error!(
+                            LogicError::TypeMisMatch(other.to_string(), Type::Procedure),
+                            procedure_expr.location
+                        )
                     }
                 }
             }
@@ -647,7 +597,14 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
                 env.define(name.clone(), value);
                 None
             }
-            Statement::SyntaxDefinition(_) => todo!("defining new syntax is not supported"),
+            Statement::SyntaxDefinition(syntax) => {
+                let SyntaxDefBody(name, value) = &syntax.data;
+                env.define(
+                    name.clone(),
+                    Value::Transformer(Transformer::Scheme(value.clone())),
+                );
+                None
+            }
             _ => error!(SyntaxError::ExpectSomething(
                 "expression/definition".to_string(),
                 "other statement".to_string(),
@@ -1656,19 +1613,18 @@ fn import_cyclic() -> Result<()> {
 }
 
 #[test]
+#[ignore]
 fn transformer() -> Result<()> {
     let it = Interpreter::<f32>::new_with_stdlib();
     // transform to expression
     it.env.define(
         "foo".to_string(),
-        Value::Transformer(Transformer::Native(|expressions| {
-            Ok(vec![Statement::Expression(
-                ExpressionBody::ProcedureCall(
-                    Box::new(ExpressionBody::Symbol("+".to_string()).into()),
-                    expressions.into_iter().collect(),
-                )
-                .into(),
-            )])
+        Value::Transformer(Transformer::Native(|datum| {
+            Ok(DatumBody::Pair(Box::new(GenericPair::cons(
+                DatumBody::Symbol("+".to_string()).into(),
+                datum.into(),
+            )))
+            .no_locate())
         })),
     );
     let env = it.env.clone();

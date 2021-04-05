@@ -31,13 +31,13 @@ impl Display for Primitive {
     }
 }
 
-pub type DatumPair = GenericPair<Datum>;
+pub type DatumList = GenericPair<Datum>;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum DatumBody {
     Primitive(Primitive),
     Symbol(String),
-    Pair(Box<DatumPair>),
+    Pair(Box<DatumList>),
     Vector(Vec<Datum>),
 }
 
@@ -59,7 +59,7 @@ impl Display for DatumBody {
 }
 
 impl Datum {
-    pub fn expect_list(self) -> Result<DatumPair, SchemeError> {
+    pub fn expect_list(self) -> Result<DatumList, SchemeError> {
         match self.data {
             DatumBody::Pair(inner) => Ok(*inner),
             _ => {
@@ -70,10 +70,22 @@ impl Datum {
             }
         }
     }
+
+    pub fn expect_symbol(&self) -> Result<String, SchemeError> {
+        match &self.data {
+            DatumBody::Symbol(symbol) => Ok(symbol.clone()),
+            _ => {
+                return error!(SyntaxError::ExpectSomething(
+                    "symbol".to_string(),
+                    self.to_string()
+                ))
+            }
+        }
+    }
 }
 
-impl From<DatumPair> for Datum {
-    fn from(pair: DatumPair) -> Self {
+impl From<DatumList> for Datum {
+    fn from(pair: DatumList) -> Self {
         Datum {
             data: DatumBody::Pair(Box::new(pair)),
             location: None, // TODO
