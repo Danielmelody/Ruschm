@@ -1008,7 +1008,7 @@ fn lambda_call() -> Result<()> {
     let program = vec![Statement::Expression(Expression::from(
         ExpressionBody::ProcedureCall(
             Box::new(simple_procedure(
-                append_param!(param_fixed!["x", "y"], "z"),
+                append_variadic_param!(param_fixed!["x", "y"], "z"),
                 Expression::from(ExpressionBody::ProcedureCall(
                     Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                     vec![

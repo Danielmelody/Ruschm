@@ -714,7 +714,11 @@ pub fn library_map<R: RealNumberInternalTrait>() -> Vec<(String, Value<R>)> {
 
 fn library_map_result<R: RealNumberInternalTrait>() -> Result<Vec<(String, Value<R>)>> {
     Ok(vec![
-        function_mapping!("apply", append_param!(param_fixed!["proc"], "args"), apply),
+        function_mapping!(
+            "apply",
+            append_variadic_param!(param_fixed!["proc"], "args"),
+            apply
+        ),
         pure_function_mapping!("car", param_fixed!["pair"], car),
         pure_function_mapping!("cdr", param_fixed!["pair"], cdr),
         pure_function_mapping!("eqv?", param_fixed!["obj1", "obj2"], eqv),
@@ -763,20 +767,28 @@ fn library_map_result<R: RealNumberInternalTrait>() -> Result<Vec<(String, Value
         pure_function_mapping!("not", param_fixed!["obj"], not),
         pure_function_mapping!(
             "boolean=?",
-            append_param!(param_fixed![], "booleans"),
+            append_variadic_param!(param_fixed![], "booleans"),
             boolean_equal
         ),
-        pure_function_mapping!("+", append_param!(param_fixed![], "x"), add),
-        pure_function_mapping!("-", append_param!(param_fixed!["x1"], "x"), sub),
-        pure_function_mapping!("*", append_param!(param_fixed![], "x"), mul),
-        pure_function_mapping!("/", append_param!(param_fixed!["x1"], "x"), div),
-        pure_function_mapping!("=", append_param!(param_fixed![], "x"), equals),
-        pure_function_mapping!("<", append_param!(param_fixed![], "x"), less),
-        pure_function_mapping!("<=", append_param!(param_fixed![], "x"), less_equal),
-        pure_function_mapping!(">", append_param!(param_fixed![], "x"), greater),
-        pure_function_mapping!(">=", append_param!(param_fixed![], "x"), greater_equal),
-        pure_function_mapping!("min", append_param!(param_fixed!["x1"], "x"), min),
-        pure_function_mapping!("max", append_param!(param_fixed!["x1"], "x"), max),
+        pure_function_mapping!("+", append_variadic_param!(param_fixed![], "x"), add),
+        pure_function_mapping!("-", append_variadic_param!(param_fixed!["x1"], "x"), sub),
+        pure_function_mapping!("*", append_variadic_param!(param_fixed![], "x"), mul),
+        pure_function_mapping!("/", append_variadic_param!(param_fixed!["x1"], "x"), div),
+        pure_function_mapping!("=", append_variadic_param!(param_fixed![], "x"), equals),
+        pure_function_mapping!("<", append_variadic_param!(param_fixed![], "x"), less),
+        pure_function_mapping!(
+            "<=",
+            append_variadic_param!(param_fixed![], "x"),
+            less_equal
+        ),
+        pure_function_mapping!(">", append_variadic_param!(param_fixed![], "x"), greater),
+        pure_function_mapping!(
+            ">=",
+            append_variadic_param!(param_fixed![], "x"),
+            greater_equal
+        ),
+        pure_function_mapping!("min", append_variadic_param!(param_fixed!["x1"], "x"), min),
+        pure_function_mapping!("max", append_variadic_param!(param_fixed!["x1"], "x"), max),
         pure_function_mapping!("abs", param_fixed!["x"], abs),
         pure_function_mapping!("sqrt", param_fixed!["x"], sqrt),
         pure_function_mapping!("exp", param_fixed!["z"], exp),

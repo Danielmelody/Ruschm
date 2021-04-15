@@ -352,7 +352,7 @@ macro_rules! param_fixed {
 }
 
 #[macro_export]
-macro_rules! append_param {
+macro_rules! append_variadic_param {
     ($fixed:expr, $append:expr) => {{
         let mut pair = $fixed;
         pair.append(ParameterFormals::Name($append.to_string()))?;
@@ -1492,7 +1492,7 @@ fn definition() -> Result<()> {
                 def_body_to_statement(DefinitionBody(
                     "add".to_string(),
                     simple_procedure(
-                        append_param!(param_fixed![], "x"),
+                        append_variadic_param!(param_fixed![], "x"),
                         ExpressionBody::Symbol("x".to_string()).into()
                     )
                 ))
@@ -1657,7 +1657,7 @@ fn lambda() -> Result<()> {
             ast,
             Some(Statement::Expression(
                 ExpressionBody::Procedure(SchemeProcedure(
-                    append_param!(param_fixed!["x"], "y"),
+                    append_variadic_param!(param_fixed!["x"], "y"),
                     vec![],
                     vec![ExpressionBody::ProcedureCall(
                         Box::new(ExpressionBody::Symbol("+".to_string()).into()),
