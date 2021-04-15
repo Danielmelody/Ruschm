@@ -1,4 +1,4 @@
-use super::{Datum, DefinitionBody, SyntaxPattern, SyntaxTemplate, TokenData};
+use super::{Datum, DefinitionBody, ParameterFormals, SyntaxPattern, SyntaxTemplate, TokenData};
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq, Clone)]
@@ -25,6 +25,8 @@ pub enum SyntaxError {
     UnmatchedParentheses,
     #[error("try to define non-symbol {0}")]
     DefineNonSymbol(Datum),
+    #[error("illegal parameter {0}")]
+    IllegalParameter(ParameterFormals),
     #[error("invalid definition {0}")]
     InvalidDefinition(Datum),
     #[error("no expression found in function body")]

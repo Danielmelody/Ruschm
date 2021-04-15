@@ -520,8 +520,6 @@ impl<R: RealNumberInternalTrait> PartialEq for Procedure<R> {
     }
 }
 
-impl ParameterFormals {}
-
 impl<R: RealNumberInternalTrait> Procedure<R> {
     pub fn new_builtin_pure(
         name: String,

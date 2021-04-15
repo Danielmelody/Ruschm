@@ -1139,7 +1139,7 @@ fn local_environment() -> Result<()> {
         Statement::Definition(Definition::from(DefinitionBody(
             "adda".to_string(),
             simple_procedure(
-                param_fixed![ParameterFormals::Name("x".to_string())],
+                param_fixed![ParameterFormalsBody::Name("x".to_string())],
                 Expression::from(ExpressionBody::ProcedureCall(
                     Box::new(Expression::from(ExpressionBody::Symbol("+".to_string()))),
                     vec![

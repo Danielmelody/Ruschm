@@ -1,7 +1,9 @@
 #![allow(dead_code)]
 use super::{
-    lexer::Lexer, pair::GenericPair, pair::Pairable, Datum, DatumBody, DatumList, Result,
-    SyntaxTemplateElement, Transformer,
+    lexer::Lexer,
+    pair::GenericPair,
+    pair::{PairIterItem, Pairable},
+    Datum, DatumBody, DatumList, Result, SyntaxTemplateElement, Transformer,
 };
 use crate::error::ToLocated;
 use crate::{environment::LexicalScope, error::*, parser::lexer::Token};
@@ -268,12 +270,62 @@ impl From<Primitive> for Expression {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum ParameterFormals {
+pub enum ParameterFormalsBody {
     Name(String),                             // (lambda x ...) or (define (f . x) ...)
     Pair(Box<GenericPair<ParameterFormals>>), // (lambda (...) ...) or (define (f ...) ...)
 }
 
+pub type ParameterFormals = Located<ParameterFormalsBody>;
+
+impl ToLocated for ParameterFormalsBody {}
+
 impl ParameterFormals {
+    pub fn new_non_located(parameters: impl Iterator<Item = String>, last: Option<String>) -> Self {
+        let fixed = parameters
+            .map(|s| ParameterFormalsBody::Name(s).no_locate())
+            .collect();
+        match last {
+            Some(last) => match fixed {
+                GenericPair::Empty => ParameterFormalsBody::Name(last).no_locate(),
+                list => ParameterFormalsBody::Pair(Box::new(GenericPair::cons(
+                    ParameterFormalsBody::Pair(Box::new(list)).no_locate(),
+                    ParameterFormalsBody::Name(last).no_locate(),
+                )))
+                .no_locate(),
+            },
+            None => ParameterFormalsBody::Pair(Box::new(fixed)).no_locate(),
+        }
+    }
+
+    pub fn split(self) -> Result<(Vec<String>, Option<String>)> {
+        Ok(match self.data {
+            ParameterFormalsBody::Name(name) => (Vec::new(), Some(name)),
+            ParameterFormalsBody::Pair(pair) => {
+                let mut proper_list = Vec::new();
+                let mut cdr = None;
+                for item in pair.into_pair_iter() {
+                    match item {
+                        PairIterItem::Proper(ParameterFormals {
+                            data: ParameterFormalsBody::Name(fixed),
+                            ..
+                        }) => proper_list.push(fixed),
+                        PairIterItem::Improper(ParameterFormals {
+                            data: ParameterFormalsBody::Name(last),
+                            ..
+                        }) => cdr = Some(last),
+                        other => {
+                            return located_error!(
+                                SyntaxError::IllegalParameter(other.get_inside()),
+                                other.get_inside().location
+                            );
+                        }
+                    }
+                }
+                (proper_list, cdr)
+            }
+        })
+    }
+
     pub fn len(&self) -> (usize, bool) {
         let mut fixed = 0;
         let variadic = self.iter_to_last(|_| fixed += 1).is_some();
@@ -281,9 +333,11 @@ impl ParameterFormals {
     }
 
     pub fn as_name(&self) -> String {
-        match self {
-            ParameterFormals::Name(name) => name.clone(),
-            ParameterFormals::Pair(_) => unreachable!("parameter name can only be a identifier"),
+        match &self.data {
+            ParameterFormalsBody::Name(name) => name.clone(),
+            ParameterFormalsBody::Pair(_) => {
+                unreachable!("parameter name can only be a identifier")
+            }
         }
     }
 
@@ -299,23 +353,6 @@ impl ParameterFormals {
                     next = Some(&cdr);
                 }
                 Some(Either::Right(improper)) => return Some(&improper),
-                None | Some(Either::Left(GenericPair::Empty)) => return None,
-            }
-        }
-    }
-
-    pub fn iter_to_last_mut(
-        &mut self,
-        mut visitor: impl FnMut(&ParameterFormals) -> (),
-    ) -> Option<&mut ParameterFormals> {
-        let mut next: Option<&mut ParameterFormals> = Some(self);
-        loop {
-            match next.take().map(|p| p.either_pair_mut()) {
-                Some(Either::Left(GenericPair::Some(car, cdr))) => {
-                    visitor(car);
-                    next = Some(cdr);
-                }
-                Some(Either::Right(improper)) => return Some(improper),
                 None | Some(Either::Left(GenericPair::Empty)) => return None,
             }
         }
@@ -341,38 +378,66 @@ impl ParameterFormals {
 }
 
 impl Pairable for ParameterFormals {
-    impl_pairable!(ParameterFormals);
+    impl_located_pairable!(ParameterFormalsBody);
 }
 
 #[macro_export]
 macro_rules! param_fixed {
-    ($($x:expr),*) => {
-        ParameterFormals::from(list![$(ParameterFormals::Name($x.to_string())),*])
-    };
+    ($($x:expr),+) => {{
+        use $crate::error::ToLocated;
+        ParameterFormals::from(list![$(ParameterFormalsBody::Name($x.to_string()).no_locate()),*])
+}};
+    () => {
+        ParameterFormals::from(list![])
+    }
 }
 
 #[macro_export]
 macro_rules! append_variadic_param {
     ($fixed:expr, $append:expr) => {{
         let mut pair = $fixed;
-        pair.append(ParameterFormals::Name($append.to_string()))?;
+        use $crate::error::ToLocated;
+        pair.append(ParameterFormalsBody::Name($append.to_string()).no_locate())?;
         pair
     }};
 }
 
 impl From<GenericPair<ParameterFormals>> for ParameterFormals {
     fn from(pair: GenericPair<ParameterFormals>) -> Self {
-        ParameterFormals::Pair(Box::new(pair))
+        ParameterFormalsBody::Pair(Box::new(pair)).no_locate()
     }
 }
 
-impl Display for ParameterFormals {
+impl Display for ParameterFormalsBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParameterFormals::Name(s) => write!(f, "{}", s),
-            ParameterFormals::Pair(pair) => write!(f, "{}", pair),
+            ParameterFormalsBody::Name(s) => write!(f, "{}", s),
+            ParameterFormalsBody::Pair(pair) => write!(f, "{}", pair),
         }
     }
+}
+
+fn test_parameter_formals() -> Result<()> {
+    let test_cases = vec![
+        (
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            Some("x".to_string()),
+        ),
+        (
+            vec!["x1".to_string(), "x2".to_string(), "x3".to_string()],
+            None,
+        ),
+        (vec![], Some("x".to_string())),
+        (vec![], None),
+    ];
+
+    for (fixed, variadic) in test_cases.into_iter() {
+        let parameters =
+            ParameterFormals::new_non_located(fixed.clone().into_iter(), variadic.clone());
+        assert_eq!(parameters.split()?, (fixed.clone(), variadic.clone()));
+    }
+
+    Ok(())
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -777,14 +842,22 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     }
 
     fn transform_formals(args: Datum) -> Result<ParameterFormals> {
+        let location = args.location;
         Ok(match args {
             Datum {
                 data: DatumBody::Pair(pair),
                 ..
-            } => ParameterFormals::Pair(Box::new(pair.map_ok(&mut |datum| {
-                Ok(ParameterFormals::Name(Self::transform_identifier(datum)?))
-            })?)),
-            single => ParameterFormals::Name(Self::transform_identifier(single)?),
+            } => ParameterFormalsBody::Pair(Box::new(pair.map_ok(&mut |datum| {
+                let sub_location = datum.location;
+                Ok(
+                    ParameterFormalsBody::Name(Self::transform_identifier(datum)?)
+                        .locate(sub_location),
+                )
+            })?))
+            .locate(location),
+            single => {
+                ParameterFormalsBody::Name(Self::transform_identifier(single)?).locate(location)
+            }
         })
     }
 
