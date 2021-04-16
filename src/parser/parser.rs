@@ -281,20 +281,13 @@ impl ToLocated for ParameterFormalsBody {}
 
 impl ParameterFormals {
     pub fn new_non_located(parameters: impl Iterator<Item = String>, last: Option<String>) -> Self {
-        let fixed = parameters
-            .map(|s| ParameterFormalsBody::Name(s).no_locate())
-            .collect();
-        match last {
-            Some(last) => match fixed {
-                GenericPair::Empty => ParameterFormalsBody::Name(last).no_locate(),
-                list => ParameterFormalsBody::Pair(Box::new(GenericPair::cons(
-                    ParameterFormalsBody::Pair(Box::new(list)).no_locate(),
-                    ParameterFormalsBody::Name(last).no_locate(),
-                )))
-                .no_locate(),
-            },
-            None => ParameterFormalsBody::Pair(Box::new(fixed)).no_locate(),
-        }
+        ParameterFormals::from_pair_iter(
+            parameters
+                .map(|s| PairIterItem::Proper(ParameterFormalsBody::Name(s).no_locate()))
+                .chain(last.into_iter().map(|last| {
+                    PairIterItem::Improper(ParameterFormalsBody::Name(last).no_locate())
+                })),
+        )
     }
 
     pub fn split(self) -> Result<(Vec<String>, Option<String>)> {
@@ -417,6 +410,7 @@ impl Display for ParameterFormalsBody {
     }
 }
 
+#[test]
 fn test_parameter_formals() -> Result<()> {
     let test_cases = vec![
         (
@@ -531,13 +525,10 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
             DatumBody::Primitive(p) => ExpressionBody::Primitive(p).locate(location).into(),
             DatumBody::Symbol(s) => ExpressionBody::Symbol(s).locate(location).into(),
             DatumBody::Pair(mut pair) => {
-                // let mut iter = list.into_iter();
-                let first = pair.pop();
+                let first = pair.pop_proper()?;
                 match first {
                     None => return error!(SyntaxError::EmptyCall),
                     Some(first) => {
-                        let first = first.get_inside();
-
                         match &first.data {
                             DatumBody::Symbol(keyword) => match keyword.as_str() {
                                 "define" => {
@@ -1135,7 +1126,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         keyword: &String,
         mut datum_list: DatumList,
     ) -> Result<SyntaxPattern> {
-        let first = Self::unwrap_non_end(datum_list.pop())?.get_inside();
+        let first = Self::unwrap_non_end(datum_list.pop_proper()?)?;
         let location = first.location;
         let providing_keyword = first.expect_symbol()?;
         if keyword != &providing_keyword {

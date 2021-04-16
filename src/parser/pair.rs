@@ -23,6 +23,36 @@ pub trait Pairable: From<GenericPair<Self>> {
     fn either_pair_mut(&mut self) -> Either<&mut GenericPair<Self>, &mut Self>;
     fn either_pair_ref(&self) -> Either<&GenericPair<Self>, &Self>;
     fn into_pair(self) -> Either<GenericPair<Self>, Self>;
+
+    fn from_pair_iter(iter: impl Iterator<Item = PairIterItem<Self>>) -> Self {
+        let mut head = GenericPair::Empty;
+        let mut tail = &mut head;
+        for element in iter {
+            match element {
+                PairIterItem::Proper(element) => match tail {
+                    GenericPair::Empty => {
+                        head = GenericPair::Some(element, Self::from(GenericPair::Empty));
+                        tail = &mut head;
+                    }
+                    GenericPair::Some(_, cdr) => {
+                        *cdr =
+                            Self::from(GenericPair::Some(element, Self::from(GenericPair::Empty)));
+                        tail = cdr.either_pair_mut().left().unwrap();
+                    }
+                },
+                PairIterItem::Improper(element) => {
+                    match tail {
+                        GenericPair::Empty => return element,
+                        GenericPair::Some(_, cdr) => {
+                            *cdr = element;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        Self::from(head)
+    }
 }
 
 macro_rules! impl_pairable {
@@ -81,6 +111,7 @@ macro_rules! impl_located_pairable {
     };
 }
 
+#[derive(Debug)]
 pub enum PairIterItem<T> {
     Proper(T),
     Improper(T),
@@ -102,18 +133,32 @@ impl<T: Clone> PairIterItem<T> {
     }
 }
 
+pub enum PairPopItem<T> {
+    Proper(T),
+    Improper(T, T),
+}
+
 impl<T: Pairable> GenericPair<T> {
-    pub fn pop(&mut self) -> Option<PairIterItem<T>> {
+    pub fn pop(&mut self) -> Option<PairPopItem<T>> {
         match mem::take(self) {
             GenericPair::Some(car, cdr) => match cdr.into_pair() {
                 Either::Left(mut pair) => {
                     mem::swap(self, &mut pair);
-                    Some(PairIterItem::Proper(car))
+                    Some(PairPopItem::Proper(car))
                 }
-                Either::Right(cdr) => Some(PairIterItem::Improper(cdr)),
+                Either::Right(cdr) => Some(PairPopItem::Improper(car, cdr)),
             },
             GenericPair::Empty => None,
         }
+    }
+
+    pub fn pop_proper(&mut self) -> Result<Option<T>, SchemeError> {
+        self.pop()
+            .map(|item| match item {
+                PairPopItem::Proper(t) => Ok(t),
+                PairPopItem::Improper(_, _) => todo!(),
+            })
+            .transpose()
     }
 
     pub fn last_cdr(&self) -> Option<&T> {
@@ -127,39 +172,17 @@ impl<T: Pairable> GenericPair<T> {
         }
     }
 
-    pub fn into_pair_iter(self) -> impl Iterator<Item = PairIterItem<T>> {
-        IntoPairIter(self)
+    pub fn into_pair_iter(self) -> IntoPairIter<T> {
+        IntoPairIter::from(self)
     }
 
-    pub fn from_pair_iter<I: IntoIterator<Item = PairIterItem<T>>>(iter: I) -> Self {
-        let mut head = GenericPair::Empty;
-        let mut tail = &mut head;
-        for element in iter {
-            match element {
-                PairIterItem::Proper(element) => match tail {
-                    GenericPair::Empty => {
-                        head = GenericPair::Some(element, T::from(GenericPair::Empty));
-                        tail = &mut head;
-                    }
-                    GenericPair::Some(_, cdr) => {
-                        *cdr = T::from(GenericPair::Some(element, T::from(GenericPair::Empty)));
-                        tail = cdr.either_pair_mut().left().unwrap();
-                    }
-                },
-                PairIterItem::Improper(element) => {
-                    match tail {
-                        GenericPair::Empty => {
-                            head = GenericPair::Some(element, T::from(GenericPair::Empty));
-                        }
-                        GenericPair::Some(_, cdr) => {
-                            *cdr = element;
-                        }
-                    }
-                    break;
-                }
-            }
+    pub fn from_pair_iter<I: IntoIterator<Item = PairIterItem<T>>>(
+        iter: I,
+    ) -> Result<Self, SchemeError> {
+        match T::from_pair_iter(iter.into_iter()).into_pair() {
+            Either::Left(pair) => Ok(pair),
+            Either::Right(_) => todo!(),
         }
-        head
     }
 
     pub fn len(&self) -> usize {
@@ -298,7 +321,7 @@ impl<T: Display + Pairable> Display for GenericPair<T> {
 // collect as a list, return head node
 impl<T: Pairable> FromIterator<T> for GenericPair<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Self::from_pair_iter(iter.into_iter().map(|item| PairIterItem::Proper(item)))
+        Self::from_pair_iter(iter.into_iter().map(|item| PairIterItem::Proper(item))).unwrap()
     }
 }
 
@@ -307,15 +330,44 @@ impl<T: Pairable> IntoIterator for GenericPair<T> {
     type IntoIter = IntoIter<T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntoIter(IntoPairIter(self))
+        IntoIter(IntoPairIter::from(self))
     }
 }
 
-pub struct IntoPairIter<T>(GenericPair<T>);
+pub struct IntoPairIter<T> {
+    pair: GenericPair<T>,
+    improper_cdr: Option<T>,
+}
+
+impl<T: Pairable> IntoPairIter<T> {
+    pub fn into_element_iter(self) -> impl Iterator<Item = T> {
+        IntoIter(self)
+    }
+}
+
+impl<T: Pairable> From<GenericPair<T>> for IntoPairIter<T> {
+    fn from(pair: GenericPair<T>) -> Self {
+        IntoPairIter {
+            pair,
+            improper_cdr: None,
+        }
+    }
+}
+
 impl<T: Pairable> Iterator for IntoPairIter<T> {
     type Item = PairIterItem<T>;
+
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.pop()
+        match self.improper_cdr {
+            Some(_) => self.improper_cdr.take().map(|i| PairIterItem::Improper(i)),
+            None => self.pair.pop().map(|i| match i {
+                PairPopItem::Improper(car, cdr) => {
+                    self.improper_cdr = Some(cdr);
+                    PairIterItem::Proper(car)
+                }
+                PairPopItem::Proper(t) => PairIterItem::Proper(t),
+            }),
+        }
     }
 }
 

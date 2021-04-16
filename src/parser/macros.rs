@@ -346,7 +346,7 @@ impl SyntaxTemplate {
                 Some(
                     DatumBody::Pair(Box::new(GenericPair::from_pair_iter(
                         new_list_elements.into_iter(),
-                    )))
+                    )?))
                     .locate(template.location),
                 )
             }
