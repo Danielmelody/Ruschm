@@ -378,6 +378,7 @@ impl Pairable for ParameterFormals {
 macro_rules! param_fixed {
     ($($x:expr),+) => {{
         use $crate::error::ToLocated;
+        use $crate::parser::ParameterFormalsBody;
         ParameterFormals::from(list![$(ParameterFormalsBody::Name($x.to_string()).no_locate()),*])
 }};
     () => {
@@ -390,6 +391,7 @@ macro_rules! append_variadic_param {
     ($fixed:expr, $append:expr) => {{
         let mut pair = $fixed;
         use $crate::error::ToLocated;
+        use $crate::parser::ParameterFormalsBody;
         pair.append(ParameterFormalsBody::Name($append.to_string()).no_locate())?;
         pair
     }};
