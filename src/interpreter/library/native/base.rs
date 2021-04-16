@@ -39,7 +39,7 @@ fn cdr<R: RealNumberInternalTrait>(
 ) -> Result<Value<R>> {
     let mut iter = arguments.into_iter();
     match iter.next().unwrap().expect_list()? {
-        Pair::Some(cdr, _) => Ok(cdr.clone()),
+        Pair::Some(_, cdr) => Ok(cdr),
         empty => return error!(LogicError::TypeMisMatch(empty.to_string(), Type::Pair)),
     }
 }
@@ -63,6 +63,16 @@ macro_rules! value_test {
             }
         }
     };
+}
+
+fn is_pair<R: RealNumberInternalTrait>(
+    arguments: impl IntoIterator<Item = Value<R>>,
+) -> Result<Value<R>> {
+    let arg = arguments.into_iter().next().unwrap();
+    match arg {
+        Value::Pair(p) if !matches!(p.as_ref(), GenericPair::Empty) => Ok(Value::Boolean(true)),
+        _ => Ok(Value::Boolean(false)),
+    }
 }
 
 fn eqv<R: RealNumberInternalTrait>(
@@ -753,7 +763,7 @@ fn library_map_result<R: RealNumberInternalTrait>() -> Result<Vec<(String, Value
             param_fixed!["obj"],
             value_test!(Value::Symbol(_))
         ),
-        pure_function_mapping!("pair?", param_fixed!["obj"], value_test!(Value::Pair(_))),
+        pure_function_mapping!("pair?", param_fixed!["obj"], is_pair),
         pure_function_mapping!(
             "procedure?",
             param_fixed!["obj"],

@@ -32,6 +32,32 @@ fn list() -> Result<(), SchemeError> {
             )))
         ))))
     );
+
+    assert_eq!(
+        interpreter.eval("(car (list 1 2))".chars())?,
+        Some(Value::Number(Number::Integer(1)))
+    );
+
+    assert_eq!(
+        interpreter.eval("(cdr (list 1 2))".chars())?,
+        Some(Value::Pair(Box::new(list!(Value::Number(
+            Number::Integer(2)
+        )))))
+    );
+
+    assert_eq!(
+        interpreter.eval("(pair? (list 1 2))".chars())?,
+        Some(Value::Boolean(true))
+    );
+
+    assert_eq!(
+        interpreter.eval("(pair? '())".chars())?,
+        Some(Value::Boolean(false))
+    );
+    assert_eq!(
+        interpreter.eval("(pair? 1)".chars())?,
+        Some(Value::Boolean(false))
+    );
     Ok(())
 }
 
