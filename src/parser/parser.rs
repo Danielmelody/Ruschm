@@ -379,6 +379,9 @@ macro_rules! param_fixed {
     ($($x:expr),+) => {{
         use $crate::error::ToLocated;
         use $crate::parser::ParameterFormalsBody;
+        use $crate::parser::ParameterFormals;
+        use $crate::parser::pair::GenericPair;
+        use $crate::list;
         ParameterFormals::from(list![$(ParameterFormalsBody::Name($x.to_string()).no_locate()),*])
 }};
     () => {
