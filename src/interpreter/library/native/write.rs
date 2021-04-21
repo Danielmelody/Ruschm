@@ -1,7 +1,5 @@
 use crate::{
     interpreter::Result,
-    parser::pair::GenericPair,
-    parser::*,
     values::{Procedure, RealNumberInternalTrait, Value},
 };
 
