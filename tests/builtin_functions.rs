@@ -62,6 +62,25 @@ fn list() -> Result<(), SchemeError> {
 }
 
 #[test]
+fn vector() -> Result<(), SchemeError> {
+    use ruschm::values::ValueReference;
+    let mut interpreter = Interpreter::<f32>::new_with_stdlib();
+    assert_eq!(
+        interpreter.eval("(vector 1 2 3)".chars())?,
+        Some(Value::Vector(ValueReference::new_mutable(vec![
+            Value::Number(Number::Integer(1)),
+            Value::Number(Number::Integer(2)),
+            Value::Number(Number::Integer(3)),
+        ])))
+    );
+    assert_eq!(
+        interpreter.eval("(vector)".chars())?,
+        Some(Value::Vector(ValueReference::new_mutable(vec![])))
+    );
+    Ok(())
+}
+
+#[test]
 fn apply() -> Result<(), SchemeError> {
     let mut interpreter = Interpreter::<f32>::new_with_stdlib();
     assert_eq!(

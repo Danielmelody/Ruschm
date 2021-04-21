@@ -818,7 +818,7 @@ fn library_map_result<R: RealNumberInternalTrait>() -> Result<Vec<(String, Value
         pure_function_mapping!("floor-remainder", param_fixed!["n1", "n2"], floor_remainder),
         //pure_function_mapping!("display", vec!["value".to_string()], None, display),
         pure_function_mapping!("newline", param_fixed![], newline),
-        pure_function_mapping!("vector", param_fixed![], vector),
+        pure_function_mapping!("vector", append_variadic_param!(param_fixed![], "obj"), vector),
         pure_function_mapping!("make-vector", param_fixed!["k", "obj"], make_vector),
         pure_function_mapping!("vector-length", param_fixed!["vector"], vector_length),
         pure_function_mapping!("vector-ref", param_fixed!["vector", "k"], vector_ref),
