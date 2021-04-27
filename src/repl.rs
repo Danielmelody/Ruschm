@@ -36,7 +36,7 @@ pub fn run_with_interpreter(mut it: Interpreter<f32>) {
 
     println!("Ruschm Version {}", VERSION);
     loop {
-        let readline = match source.is_empty() {
+        let readline = match &source.is_empty() {
             true => rl.readline("> "),
             false => rl.readline(""),
         };
@@ -46,7 +46,6 @@ pub fn run_with_interpreter(mut it: Interpreter<f32>) {
                     continue;
                 }
                 source.push_str(line.as_str());
-                source.push_str("\n");
                 if check_bracket_closed(source.chars()) {
                     match it.eval(source.chars()) {
                         Ok(opt) => {
@@ -59,6 +58,7 @@ pub fn run_with_interpreter(mut it: Interpreter<f32>) {
                         }
                         Err(e) => eprintln!("{}", e),
                     }
+                    rl.add_history_entry(source.clone());
                     source.clear();
                 }
             }
