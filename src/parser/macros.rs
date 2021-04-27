@@ -20,7 +20,7 @@ impl UserDefinedTransformer {
     fn transform(&self, keyword: &str, datum: Datum) -> Result<Datum, SchemeError> {
         for (pattern, template) in &self.rules {
             let mut substitutions = HashMap::new();
-            if pattern.match_datum(&datum, &self.literals, &mut substitutions)? {
+            if pattern.match_datum(&datum, 0, &self.literals, &mut substitutions)? {
                 let mut substituded = template.substitude(&substitutions)?;
                 if substituded.len() != 1 {
                     return located_error!(
@@ -71,6 +71,7 @@ impl SyntaxPattern {
     fn match_datum_stream<'a>(
         pattern_index: usize,
         datum_index: usize,
+        depth: usize,
         patterns: &Vec<SyntaxPattern>,
         datums: &Vec<Datum>,
         pattern_literals: &HashSet<String>,
@@ -89,6 +90,7 @@ impl SyntaxPattern {
                 ) if multi_matches.is_some() => Self::match_datum_stream(
                     pattern_index + 1,
                     datum_index + 1,
+                    depth,
                     patterns,
                     datums,
                     pattern_literals,
@@ -96,7 +98,12 @@ impl SyntaxPattern {
                     multi_matches,
                 )?,
                 (Some(sub_pattern), Some(sub_datum))
-                    if sub_pattern.match_datum(&sub_datum, pattern_literals, substitutions)? =>
+                    if sub_pattern.match_datum(
+                        &sub_datum,
+                        depth + 1,
+                        pattern_literals,
+                        substitutions,
+                    )? =>
                 {
                     match &sub_pattern.data {
                         SyntaxPatternBody::Ellipsis => {
@@ -104,6 +111,7 @@ impl SyntaxPattern {
                                 let mut multi_matches_substitutions = HashMap::new();
                                 if multi_match_pattern.match_datum(
                                     sub_datum,
+                                    depth + 1,
                                     pattern_literals,
                                     &mut multi_matches_substitutions,
                                 )? {
@@ -114,6 +122,7 @@ impl SyntaxPattern {
                                 if Self::match_datum_stream(
                                     pattern_index,
                                     datum_index + 1,
+                                    depth,
                                     patterns,
                                     datums,
                                     pattern_literals,
@@ -125,6 +134,7 @@ impl SyntaxPattern {
                                     return Self::match_datum_stream(
                                         pattern_index + 1,
                                         datum_index + 1,
+                                        depth,
                                         patterns,
                                         datums,
                                         pattern_literals,
@@ -143,6 +153,7 @@ impl SyntaxPattern {
                             Self::match_datum_stream(
                                 pattern_index + 1,
                                 datum_index + 1,
+                                depth,
                                 patterns,
                                 datums,
                                 pattern_literals,
@@ -153,6 +164,7 @@ impl SyntaxPattern {
                         _ => Self::match_datum_stream(
                             pattern_index + 1,
                             datum_index + 1,
+                            depth,
                             patterns,
                             datums,
                             pattern_literals,
@@ -169,16 +181,25 @@ impl SyntaxPattern {
     fn match_datum(
         &self,
         datum: &Datum,
+        depth: usize,
         pattern_literals: &HashSet<String>,
         substitutions: &mut HashMap<String, (Datum, Vec<Datum>)>,
     ) -> Result<bool, SchemeError> {
-        Ok(match (&self.data, &datum.data) {
+        // println!(
+        //     "{:indent$}matching '{}' with {}",
+        //     "",
+        //     self,
+        //     datum,
+        //     indent = depth,
+        // );
+        let result = match (&self.data, &datum.data) {
             (SyntaxPatternBody::Underscore, _) => true,
             (SyntaxPatternBody::Ellipsis, _) => true,
             (SyntaxPatternBody::Pair(pattern_pair), DatumBody::Pair(datum_pair)) => {
                 if SyntaxPattern::match_datum_stream(
                     0,
                     0,
+                    depth + 1,
                     &pattern_pair.iter().cloned().collect(),
                     &datum_pair.iter().cloned().collect(),
                     pattern_literals,
@@ -186,9 +207,12 @@ impl SyntaxPattern {
                     None,
                 )? {
                     match (pattern_pair.last_cdr(), datum_pair.last_cdr()) {
-                        (Some(last_pattern), Some(last_datum)) => {
-                            last_pattern.match_datum(last_datum, pattern_literals, substitutions)?
-                        }
+                        (Some(last_pattern), Some(last_datum)) => last_pattern.match_datum(
+                            last_datum,
+                            depth + 1,
+                            pattern_literals,
+                            substitutions,
+                        )?,
                         (None, None) => true,
                         _ => false,
                     }
@@ -201,6 +225,7 @@ impl SyntaxPattern {
                 SyntaxPattern::match_datum_stream(
                     0,
                     0,
+                    depth + 1,
                     &sub_patterns,
                     &sub_data,
                     pattern_literals,
@@ -208,15 +233,28 @@ impl SyntaxPattern {
                     None,
                 )?
             }
-            (SyntaxPatternBody::Identifier(symbol), _) => {
-                if !pattern_literals.contains(symbol) {
-                    substitutions.insert(symbol.clone(), (datum.clone(), Vec::new()));
-                };
-                true
+            (SyntaxPatternBody::Identifier(pattern_symbol), datum_body) => {
+                if !pattern_literals.contains(pattern_symbol) {
+                    substitutions.insert(pattern_symbol.clone(), (datum.clone(), Vec::new()));
+                    true
+                } else {
+                    match &datum_body {
+                        &DatumBody::Symbol(datum_symbol) if datum_symbol == pattern_symbol => true,
+                        _ => false,
+                    }
+                }
             }
             (SyntaxPatternBody::Primitive(_), DatumBody::Primitive(_)) => true,
             _ => false,
-        })
+        };
+
+        // println!(
+        //     "{:indent$}{}",
+        //     "",
+        //     if result { "succeeded" } else { "failed" },
+        //     indent = depth
+        // );
+        Ok(result)
     }
 }
 

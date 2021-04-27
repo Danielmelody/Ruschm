@@ -99,6 +99,30 @@ fn booleans() -> Result<(), SchemeError> {
     {
         let mut interpreter = Interpreter::<f32>::new_with_stdlib();
         assert_eq!(
+            interpreter.eval("(if #f #t #f)".chars())?,
+            Some(Value::Boolean(false))
+        );
+        assert_eq!(
+            interpreter.eval("(if #t #t #f)".chars())?,
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            interpreter.eval("(if '() #t #f)".chars())?,
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            interpreter.eval("(if 1 #t #f)".chars())?,
+            Some(Value::Boolean(true))
+        );
+        assert_eq!(
+            interpreter.eval("(if 0 #t #f)".chars())?,
+            Some(Value::Boolean(true))
+        );
+    }
+
+    {
+        let mut interpreter = Interpreter::<f32>::new_with_stdlib();
+        assert_eq!(
             interpreter.eval("(not #f)".chars())?,
             Some(Value::Boolean(true))
         );

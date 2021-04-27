@@ -6,6 +6,7 @@
         vector-length vector-ref vector-set!
         caar cadr cdar cddr caaar caadr cadar caddr cdaar cdadr cddar cdddr
         list make-list null? append
+        memq memv
         map for-each fold-left fold-right
         list-tail list-ref last-pair head atom? equal? list?
     )
@@ -46,11 +47,11 @@
             )
         )
 
-        ; (define filter
-        ;     (lambda (pred lst)
-        ;       (cond ((null? lst) '())
-        ;             ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))
-        ;             (else (filterb pred (cdr lst))))))
+        (define filter
+            (lambda (pred lst)
+              (cond ((null? lst) '())
+                    ((pred (car lst)) (cons (car lst) (filter pred (cdr lst))))
+                    (else (filterb pred (cdr lst))))))
 
 
         (define (for-each proc list)
@@ -86,8 +87,9 @@
         (define (head stream) (car stream))
 
         ;;;;	atom?
-        (define (atom? x)
-        (not (pair? x)))
+        (define atom?
+            (lambda (x)
+              (and (not (pair? x)) (not (null? x)))))
 
         ;;;;	memq
         (define (memq obj lst)
@@ -95,6 +97,12 @@
             ((null? lst) #f)
             ((eq? obj (car lst)) lst)
             (else (memq obj (cdr lst)))))
+
+        (define (memv obj lst)
+          (cond
+            ((null? lst) #f)
+            ((eqv? obj (car lst)) lst)
+            (else (memv obj (cdr lst)))))
 
         ;;;;    equal?
         (define (equal? x y)

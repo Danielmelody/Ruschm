@@ -730,6 +730,12 @@ impl<R: RealNumberInternalTrait> Value<R> {
     pub fn expect_boolean(self) -> Result<bool> {
         match_expect_type!(self, Value::Boolean(condition) => condition, Type::Boolean)
     }
+    pub fn as_boolean(&self) -> bool {
+        match self {
+            Value::Boolean(false) => false,
+            _ => true,
+        }
+    }
 }
 
 impl<R: RealNumberInternalTrait> Display for Value<R> {

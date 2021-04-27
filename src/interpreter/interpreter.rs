@@ -330,7 +330,7 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
             }
             ExpressionBody::Conditional(cond) => {
                 let (test, consequent, alternative) = cond.as_ref();
-                let condition = Self::eval_expression(&test, &env)?.expect_boolean()?;
+                let condition = Self::eval_expression(&test, &env)?.as_boolean();
                 if condition {
                     Self::eval_tail_expression(consequent, env)?
                 } else {
@@ -362,7 +362,7 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
                     }
                     ExpressionBody::Conditional(cond) => {
                         let (test, consequent, alternative) = *cond;
-                        let condition = Self::eval_expression(&test, &env)?.expect_boolean()?;
+                        let condition = Self::eval_expression(&test, &env)?.as_boolean();
                         if condition {
                             Self::eval_owned_tail_expression(consequent, env)?
                         } else {
@@ -445,7 +445,7 @@ impl<'a, R: RealNumberInternalTrait> Interpreter<'a, R> {
             }
             ExpressionBody::Conditional(cond) => {
                 let &(test, consequent, alternative) = &cond.as_ref();
-                if Self::eval_expression(&test, &env)?.expect_boolean()? {
+                if Self::eval_expression(&test, &env)?.as_boolean() {
                     Self::eval_expression(&consequent, env)?
                 } else {
                     match alternative {
