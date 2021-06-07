@@ -7,7 +7,7 @@
         caar cadr cdar cddr caaar caadr cadar caddr cdaar cdadr cddar cdddr
         list make-list null? append
         memq memv
-        map for-each fold-left fold-right
+        map for-each fold fold-left fold-right
         list-tail list-ref last-pair head atom? equal? list?
     )
     (begin
@@ -64,6 +64,8 @@
                 (fold-left f
                            (f (car seq) init)
                            (cdr seq))))
+
+        (define fold fold-left)
 
         (define (fold-right f init seq)
             (if (null? seq)

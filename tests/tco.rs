@@ -5,11 +5,11 @@ use ruschm::{
 };
 
 #[test]
-fn match_list() -> Result<(), SchemeError> {
+fn tco_unbounded_range() -> Result<(), SchemeError> {
     let mut interpreter = Interpreter::<f32>::new_with_stdlib();
     assert_eq!(
-        interpreter.eval(include_str!("./macro_testcases/macro_list.scm").chars())?,
-        Some(Value::Number(Number::Integer(3)))
+        interpreter.eval(include_str!("./tco_testcases/fib-tail.scm").chars())?,
+        Some(Value::Number(Number::Integer(196418)))
     );
     Ok(())
 }
