@@ -61,6 +61,9 @@ pub fn run_with_interpreter(mut it: Interpreter<f32>) {
                     rl.add_history_entry(source.clone());
                     source.clear();
                 }
+				else {
+					source.push('\n');
+				}
             }
             Err(ReadlineError::Interrupted) => {
                 source.clear();
