@@ -8,7 +8,7 @@ use super::{
     pair::{GenericPair, Pairable},
 };
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Primitive {
     String(String),
     Character(char),
@@ -63,7 +63,7 @@ impl Datum {
         match self.data {
             DatumBody::Pair(inner) => Ok(*inner),
             _ => {
-                return error!(SyntaxError::ExpectSomething(
+                error!(SyntaxError::ExpectSomething(
                     "list/pair".to_string(),
                     self.to_string()
                 ))
@@ -75,7 +75,7 @@ impl Datum {
         match &self.data {
             DatumBody::Symbol(symbol) => Ok(symbol.clone()),
             _ => {
-                return error!(SyntaxError::ExpectSomething(
+                error!(SyntaxError::ExpectSomething(
                     "symbol".to_string(),
                     self.to_string()
                 ))

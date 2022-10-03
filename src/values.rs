@@ -53,9 +53,9 @@ impl<R: RealNumberInternalTrait> Display for Number<R> {
 impl<R: RealNumberInternalTrait> Number<R> {
     pub(crate) fn exact_eqv(&self, other: &Self) -> bool {
         match (self, other) {
-            (Number::Integer(a), Number::Integer(b)) => a.eq(&b),
+            (Number::Integer(a), Number::Integer(b)) => a.eq(b),
             (Number::Rational(a1, b1), Number::Rational(a2, b2)) => (a1 * b2).eq(&(b1 * a2)),
-            (Number::Real(a), Number::Real(b)) => a.eq(&b),
+            (Number::Real(a), Number::Real(b)) => a.eq(b),
             _ => false,
         }
     }
@@ -107,8 +107,8 @@ pub(crate) fn upcast_oprands<R: RealNumberInternalTrait>(
         (Number::Integer(a), Number::Rational(dividend, dividor)) => {
             NumberBinaryOperand::Rational(a, 1, dividend, dividor)
         }
-        (Number::Integer(a), Number::Integer(b)) => (NumberBinaryOperand::Integer(a, b)),
-        (Number::Real(a), Number::Real(b)) => (NumberBinaryOperand::Real(a, b)),
+        (Number::Integer(a), Number::Integer(b)) => NumberBinaryOperand::Integer(a, b),
+        (Number::Real(a), Number::Real(b)) => NumberBinaryOperand::Real(a, b),
         (Number::Rational(a1, a2), Number::Rational(b1, b2)) => {
             NumberBinaryOperand::Rational(a1, a2, b1, b2)
         }
@@ -454,6 +454,7 @@ pub type ArgVec<R> = SmallVec<[Value<R>; 4]>;
 #[derive(Clone)]
 pub enum BuiltinProcedureBody<R: RealNumberInternalTrait> {
     Pure(fn(ArgVec<R>) -> Result<Value<R>>),
+    #[allow(clippy::type_complexity)]
     Impure(Rc<dyn Fn(ArgVec<R>, Rc<Environment<R>>) -> Result<Value<R>>>),
 }
 
@@ -461,7 +462,9 @@ impl<R: RealNumberInternalTrait> PartialEq for BuiltinProcedureBody<R> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (BuiltinProcedureBody::Pure(fpa), BuiltinProcedureBody::Pure(fpb)) => fpa == fpb,
-            (BuiltinProcedureBody::Impure(fpa), BuiltinProcedureBody::Impure(fpb)) => {
+            (BuiltinProcedureBody::Impure(fpa), BuiltinProcedureBody::Impure(fpb)) =>
+            {
+                #[allow(clippy::vtable_address_comparisons)]
                 Rc::ptr_eq(fpa, fpb)
             }
             _ => false,
@@ -560,7 +563,7 @@ impl<R: RealNumberInternalTrait> Display for Procedure<R> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueReference<T> {
     Immutable(Rc<T>),
     Mutable(Rc<RefCell<T>>),
@@ -594,7 +597,7 @@ impl<T: Display> ValueReference<Vec<T>> {
             ValueReference::Mutable(t) => Box::new(t.borrow()),
         }
     }
-    pub fn as_mut<'a>(&'a self) -> Result<RefMut<'a, Vec<T>>> {
+    pub fn as_mut(&self) -> Result<RefMut<Vec<T>>> {
         match self {
             ValueReference::Immutable(_) => error!(LogicError::RequiresMutable(self.to_string())),
             ValueReference::Mutable(t) => Ok(t.borrow_mut()),
@@ -647,7 +650,7 @@ fn macro_match_expect_type() {
 }
 
 // TODO: using enum as type when RFC 1450 is stable
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
     Number, // Non exhaustive, but ok
     Integer,
@@ -731,10 +734,7 @@ impl<R: RealNumberInternalTrait> Value<R> {
         match_expect_type!(self, Value::Boolean(condition) => condition, Type::Boolean)
     }
     pub fn as_boolean(&self) -> bool {
-        match self {
-            Value::Boolean(false) => false,
-            _ => true,
-        }
+        !matches!(self, Value::Boolean(false))
     }
 }
 

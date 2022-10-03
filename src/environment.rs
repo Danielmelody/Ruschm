@@ -82,6 +82,12 @@ impl<V> LexicalScope<V> {
     }
 }
 
+impl<V> Default for LexicalScope<V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type Environment<R> = LexicalScope<Value<R>>;
 
 #[test]

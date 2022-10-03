@@ -3,6 +3,9 @@ use crate::parser::*;
 use crate::values::*;
 use crate::{environment::*, interpreter::*};
 use crate::{error::ErrorData, error::ToLocated};
+
+#[cfg(test)]
+use std::f32::consts::PI;
 use std::rc::Rc;
 
 fn apply<R: RealNumberInternalTrait>(
@@ -30,7 +33,7 @@ fn car<R: RealNumberInternalTrait>(
     let mut iter = arguments.into_iter();
     match iter.next().unwrap().expect_list()? {
         Pair::Some(car, _) => Ok(car),
-        empty => return error!(LogicError::TypeMisMatch(empty.to_string(), Type::Pair)),
+        empty => error!(LogicError::TypeMisMatch(empty.to_string(), Type::Pair)),
     }
 }
 
@@ -40,7 +43,7 @@ fn cdr<R: RealNumberInternalTrait>(
     let mut iter = arguments.into_iter();
     match iter.next().unwrap().expect_list()? {
         Pair::Some(_, cdr) => Ok(cdr),
-        empty => return error!(LogicError::TypeMisMatch(empty.to_string(), Type::Pair)),
+        empty => error!(LogicError::TypeMisMatch(empty.to_string(), Type::Pair)),
     }
 }
 
@@ -85,7 +88,7 @@ fn eqv<R: RealNumberInternalTrait>(
         (Value::Vector(a), Value::Vector(b)) => Ok(Value::Boolean(a.ptr_eq(b))),
         (Value::Pair(a), Value::Pair(b)) => Ok(Value::Boolean(match (a.as_ref(), b.as_ref()) {
             (GenericPair::Empty, GenericPair::Empty) => true,
-            _ => a.as_ref() as *const Pair<R> == b.as_ref() as *const Pair<R>,
+            _ => std::ptr::eq(a.as_ref(), b.as_ref()),
         })),
         (Value::Number(a), Value::Number(b)) => Ok(Value::Boolean(a.exact_eqv(b))),
         _ => Ok(Value::Boolean(a == b)),
@@ -269,7 +272,7 @@ fn div<R: RealNumberInternalTrait>(
         Some(value) => (first / value.expect_number()?)?,
         None => (Number::Integer(1) / first)?,
     };
-    iter.try_fold(init, |a, b| Ok((a / b.expect_number()?)?))
+    iter.try_fold(init, |a, b| (a / b.expect_number()?))
         .map(|num| Value::Number(num))
 }
 
@@ -436,7 +439,7 @@ fn builtin_vector_length() {
             Value::String("foo".to_string()),
             Value::Number(Number::Rational(5, 3)),
         ]));
-        let arguments = vec![vector.clone()];
+        let arguments = vec![vector];
         assert_eq!(
             vector_length(arguments),
             Ok(Value::Number(Number::Integer(3)))
@@ -444,7 +447,7 @@ fn builtin_vector_length() {
     }
     {
         let vector: Value<f32> = Value::Vector(ValueReference::new_immutable(vec![]));
-        let arguments = vec![vector.clone()];
+        let arguments = vec![vector];
         assert_eq!(
             vector_length(arguments),
             Ok(Value::Number(Number::Integer(0)))
@@ -488,7 +491,7 @@ fn builtin_vector_ref() {
         );
     }
     {
-        let arguments = vec![vector.clone(), Value::Number(Number::Integer(3))];
+        let arguments = vec![vector, Value::Number(Number::Integer(3))];
         assert_eq!(
             vector_ref(arguments),
             Err(ErrorData::Logic(LogicError::VectorIndexOutOfBounds).no_locate())
@@ -523,13 +526,13 @@ fn builtin_vector_set() -> Result<()> {
         let arguments = vec![
             vector.clone(),
             Value::Number(Number::Integer(0)),
-            Value::Number(Number::Real(3.14)),
+            Value::Number(Number::Real(PI)),
         ];
         assert_eq!(vector_set(arguments), Ok(Value::Void));
         assert_eq!(
             vector,
             Value::Vector(ValueReference::new_mutable(vec![
-                Value::Number(Number::Real(3.14)),
+                Value::Number(Number::Real(PI)),
                 Value::String("foo".to_string()),
                 Value::Number(Number::Rational(5, 3)),
             ]))
@@ -545,7 +548,7 @@ fn builtin_vector_set() -> Result<()> {
         assert_eq!(
             vector,
             Value::Vector(ValueReference::new_mutable(vec![
-                Value::Number(Number::Real(3.14)),
+                Value::Number(Number::Real(PI)),
                 Value::Number(Number::Integer(5)),
                 Value::Number(Number::Rational(5, 3)),
             ]))
@@ -561,7 +564,7 @@ fn builtin_vector_set() -> Result<()> {
         assert_eq!(
             vector,
             Value::Vector(ValueReference::new_mutable(vec![
-                Value::Number(Number::Real(3.14)),
+                Value::Number(Number::Real(PI)),
                 Value::Number(Number::Integer(5)),
                 Value::String("bar".to_string()),
             ]))
@@ -569,7 +572,7 @@ fn builtin_vector_set() -> Result<()> {
     }
     {
         let arguments = vec![
-            vector.clone(),
+            vector,
             Value::Number(Number::Integer(3)),
             Value::Number(Number::Integer(5)),
         ];
@@ -582,7 +585,7 @@ fn builtin_vector_set() -> Result<()> {
 }
 
 fn newline<R: RealNumberInternalTrait>(_: impl IntoIterator<Item = Value<R>>) -> Result<Value<R>> {
-    println!("");
+    println!();
     Ok(Value::Void)
 }
 
@@ -598,6 +601,7 @@ macro_rules! typed_comparision {
                     let mut last_num = first.$expect_type()?;
                     for current in iter {
                         let current_num = current.$expect_type()?;
+                        #[allow(clippy::neg_cmp_op_on_partial_ord)]
                         if !(last_num $operator current_num) {
                             return Ok(Value::Boolean(false));
                         }

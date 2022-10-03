@@ -10,7 +10,7 @@ fn display<R: RealNumberInternalTrait>(
     Ok(Value::Void)
 }
 
-pub fn library_map<'a, R: RealNumberInternalTrait>() -> Vec<(String, Value<R>)> {
+pub fn library_map<R: RealNumberInternalTrait>() -> Vec<(String, Value<R>)> {
     vec![pure_function_mapping!(
         "display",
         param_fixed!["value"],

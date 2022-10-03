@@ -11,8 +11,8 @@ fn check_bracket_closed(chars: impl Iterator<Item = char>) -> bool {
     let mut in_comment = false;
     for c in chars {
         match (c, in_comment) {
-            ('(', false) => count = count + 1,
-            (')', false) => count = count - 1,
+            ('(', false) => count += 1,
+            (')', false) => count -= 1,
             (';', false) => in_comment = true,
             ('\n', true) => in_comment = false,
             _ => (),
@@ -32,7 +32,7 @@ pub fn run_with_interpreter(mut it: Interpreter<f32>) {
     io::stdout().flush().unwrap();
     let mut source = String::new();
 
-    const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+    const VERSION: &str = env!("CARGO_PKG_VERSION");
 
     println!("Ruschm Version {}", VERSION);
     loop {

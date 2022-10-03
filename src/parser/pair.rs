@@ -7,7 +7,7 @@ use std::{fmt::Display, iter::FromIterator, mem};
 // Some(T, T <another pair> )) for proper list
 // Empty for empty list
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenericPair<T> {
     Some(T, T),
     Empty,
@@ -189,6 +189,10 @@ impl<T: Pairable> GenericPair<T> {
         self.iter().count()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.iter().next().is_none()
+    }
+
     pub fn iter(&self) -> Iter<T> {
         Iter { next: Some(self) }
     }
@@ -291,28 +295,24 @@ impl<T: Display + Pairable> Display for GenericPair<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(")?;
         let mut current_value = self;
-        loop {
-            match current_value {
-                GenericPair::Some(car, cdr) => {
-                    write!(f, "{}", car)?;
-                    match cdr.either_pair_ref() {
-                        Either::Left(pair) => {
-                            match pair {
-                                GenericPair::Some(_, _) => {
-                                    write!(f, " ")?;
-                                }
-                                GenericPair::Empty => (),
-                            }
-                            current_value = pair;
+
+        while let GenericPair::Some(car, cdr) = current_value {
+            write!(f, "{}", car)?;
+            match cdr.either_pair_ref() {
+                Either::Left(pair) => {
+                    match pair {
+                        GenericPair::Some(_, _) => {
+                            write!(f, " ")?;
                         }
-                        Either::Right(value) => {
-                            write!(f, " . {}", value)?;
-                            break;
-                        }
+                        GenericPair::Empty => (),
                     }
+                    current_value = pair;
                 }
-                GenericPair::Empty => break,
-            };
+                Either::Right(value) => {
+                    write!(f, " . {}", value)?;
+                    break;
+                }
+            }
         }
         write!(f, ")")
     }

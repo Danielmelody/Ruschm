@@ -138,7 +138,7 @@ impl LibraryName {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum ExportSpec {
     Direct(String),
     Rename(String, String),
@@ -180,33 +180,33 @@ impl Statement {
     }
 }
 
-impl Into<Statement> for Expression {
-    fn into(self) -> Statement {
-        Statement::Expression(self)
+impl From<Expression> for Statement {
+    fn from(expr: Expression) -> Statement {
+        Statement::Expression(expr)
     }
 }
 
-impl Into<Statement> for SyntaxDef {
-    fn into(self) -> Statement {
-        Statement::SyntaxDefinition(self)
+impl From<SyntaxDef> for Statement {
+    fn from(syntax_def: SyntaxDef) -> Statement {
+        Statement::SyntaxDefinition(syntax_def)
     }
 }
 
-impl Into<Statement> for Definition {
-    fn into(self) -> Statement {
-        Statement::Definition(self)
+impl From<Definition> for Statement {
+    fn from(definition: Definition) -> Statement {
+        Statement::Definition(definition)
     }
 }
 
-impl Into<Statement> for Located<ImportDeclaration> {
-    fn into(self) -> Statement {
-        Statement::ImportDeclaration(self)
+impl From<Located<ImportDeclaration>> for Statement {
+    fn from(import_declaration: Located<ImportDeclaration>) -> Statement {
+        Statement::ImportDeclaration(import_declaration)
     }
 }
 
-impl Into<Statement> for Located<LibraryDefinition> {
-    fn into(self) -> Statement {
-        Statement::LibraryDefinition(self)
+impl From<Located<LibraryDefinition>> for Statement {
+    fn from(library_definition: Located<LibraryDefinition>) -> Statement {
+        Statement::LibraryDefinition(library_definition)
     }
 }
 
@@ -336,16 +336,16 @@ impl ParameterFormals {
 
     pub fn iter_to_last(
         &self,
-        mut visitor: impl FnMut(&ParameterFormals) -> (),
+        mut visitor: impl FnMut(&ParameterFormals),
     ) -> Option<&ParameterFormals> {
         let mut next: Option<&ParameterFormals> = Some(self);
         loop {
             match next.take().map(|p| p.either_pair_ref()) {
                 Some(Either::Left(GenericPair::Some(car, cdr))) => {
-                    visitor(&car);
-                    next = Some(&cdr);
+                    visitor(car);
+                    next = Some(cdr);
                 }
-                Some(Either::Right(improper)) => return Some(&improper),
+                Some(Either::Right(improper)) => return Some(improper),
                 None | Some(Either::Left(GenericPair::Empty)) => return None,
             }
         }
@@ -451,7 +451,7 @@ impl SchemeProcedure {
         let SchemeProcedure(_, defs, exprs) = self;
         defs.first()
             .and_then(|d| d.location)
-            .or(exprs.first().and_then(|e| e.location))
+            .or_else(|| exprs.first().and_then(|e| e.location))
     }
 }
 
@@ -620,8 +620,9 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
     pub fn current_datum(&mut self) -> Result<Option<Datum>> {
         match self.current.take() {
             None => Ok(None),
-            Some(current) => match current {
-                Token { data, location } => Ok(match data {
+            Some(current) => {
+                let Token { data, location } = current;
+                Ok(match data {
                     TokenData::Primitive(p) => Datum {
                         data: DatumBody::Primitive(p),
                         location,
@@ -643,13 +644,13 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     }
                     .into(),
                     other => return located_error!(SyntaxError::UnexpectedToken(other), location),
-                }),
-            },
+                })
+            }
         }
     }
 
     pub fn unwrap_non_end<T>(op: Option<T>) -> Result<T> {
-        op.ok_or(ErrorData::from(SyntaxError::UnexpectedEnd).no_locate())
+        op.ok_or_else(|| ErrorData::from(SyntaxError::UnexpectedEnd).no_locate())
     }
 
     pub fn current_list_or_pair(&mut self) -> Result<Datum> {
@@ -658,44 +659,40 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         let list_location = self.location;
         let mut encounter_period = false;
         loop {
-            match self.advance_unwrap(1)? {
-                Token { data, location } => match data {
-                    TokenData::Period => {
-                        if encounter_period {
-                            return located_error!(
-                                SyntaxError::UnexpectedToken(TokenData::Period),
-                                location.clone()
-                            );
-                        }
-                        encounter_period = true;
-                        continue;
+            let Token { data, location } = self.advance_unwrap(1)?;
+            match data {
+                TokenData::Period => {
+                    if encounter_period {
+                        return located_error!(
+                            SyntaxError::UnexpectedToken(TokenData::Period),
+                            *location
+                        );
                     }
-                    TokenData::RightParen => break,
-                    _ => {
-                        let element = Self::unwrap_non_end(self.current_datum()?)?;
-                        match tail {
-                            DatumList::Empty => {
-                                head = Box::new(DatumList::Some(
-                                    element,
-                                    Datum::from(DatumList::Empty),
-                                ));
-                                tail = head.as_mut();
+                    encounter_period = true;
+                    continue;
+                }
+                TokenData::RightParen => break,
+                _ => {
+                    let element = Self::unwrap_non_end(self.current_datum()?)?;
+                    match tail {
+                        DatumList::Empty => {
+                            head =
+                                Box::new(DatumList::Some(element, Datum::from(DatumList::Empty)));
+                            tail = head.as_mut();
+                        }
+                        DatumList::Some(_, cdr) => {
+                            if encounter_period {
+                                *cdr = element;
+                                self.expect_next_nth(1, TokenData::RightParen)?;
+                                break;
                             }
-                            DatumList::Some(_, cdr) => {
-                                if encounter_period {
-                                    *cdr = element;
-                                    self.expect_next_nth(1, TokenData::RightParen)?;
-                                    break;
-                                }
-                                assert_eq!(*cdr, Datum::from(DatumList::Empty));
-                                let new_tail =
-                                    DatumList::Some(element, Datum::from(DatumList::Empty));
-                                *cdr = Datum::from(new_tail);
-                                tail = cdr.either_pair_mut().left().unwrap();
-                            }
+                            assert_eq!(*cdr, Datum::from(DatumList::Empty));
+                            let new_tail = DatumList::Some(element, Datum::from(DatumList::Empty));
+                            *cdr = Datum::from(new_tail);
+                            tail = cdr.either_pair_mut().left().unwrap();
                         }
                     }
-                },
+                }
             }
         }
         Ok(DatumBody::Pair(head).locate(list_location))
@@ -782,7 +779,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
 
     fn transform_identifier(datum: Datum) -> Result<String> {
         match datum.data {
-            DatumBody::Symbol(ident) => Ok(ident.clone()),
+            DatumBody::Symbol(ident) => Ok(ident),
             other => located_error!(
                 SyntaxError::ExpectSomething("identifier".to_string(), other.to_string()),
                 datum.location
@@ -1055,14 +1052,11 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     Ok(DefinitionBody(name, procedure))
                 }
                 other => {
-                    return located_error!(
-                        SyntaxError::InvalidDefinition(Datum::from(other)),
-                        location
-                    )
+                    located_error!(SyntaxError::InvalidDefinition(Datum::from(other)), location)
                 }
             },
             other => {
-                return located_error!(SyntaxError::DefineNonSymbol(other.no_locate()), location)
+                located_error!(SyntaxError::DefineNonSymbol(other.no_locate()), location)
             }
         }
     }
@@ -1162,18 +1156,15 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
                     .collect::<Result<Vec<_>>>()?,
             ),
         };
-        Ok(SyntaxPattern {
-            data,
-            location: location,
-        })
+        Ok(SyntaxPattern { data, location })
     }
 
     fn collect_template_elements(
-        mut datums: impl Iterator<Item = Datum>,
+        datums: impl Iterator<Item = Datum>,
     ) -> Result<impl IntoIterator<Item = SyntaxTemplateElement>> {
         let mut last_template = None;
         let mut elements = vec![];
-        while let Some(datum) = datums.next() {
+        for datum in datums {
             let location = datum.location;
             match datum.data {
                 DatumBody::Symbol(symbol) if symbol == "..." => match last_template {
@@ -1278,7 +1269,7 @@ impl<TokenIter: Iterator<Item = Result<Token>>> Parser<TokenIter> {
         Ok(&mut self.current)
     }
 
-    fn advance_unwrap<'a>(&'a mut self, count: usize) -> Result<&'a mut Token> {
+    fn advance_unwrap(&mut self, count: usize) -> Result<&mut Token> {
         let location = self.location;
         let token = self.advance(count)?;
         match token {
@@ -2220,7 +2211,7 @@ fn export_spec() -> Result<()> {
             export_spec,
             Some(Statement::LibraryDefinition(
                 LibraryDefinition(
-                    library_name!("foo").into(),
+                    library_name!("foo"),
                     vec![LibraryDeclaration::Export(vec![
                         ExportSpec::Direct("a".to_string()).into()
                     ])
@@ -2253,7 +2244,7 @@ fn export_spec() -> Result<()> {
             export_spec,
             Some(Statement::LibraryDefinition(
                 LibraryDefinition(
-                    library_name!("foo").into(),
+                    library_name!("foo"),
                     vec![LibraryDeclaration::Export(vec![ExportSpec::Rename(
                         "a".to_string(),
                         "b".to_string()
@@ -2312,7 +2303,7 @@ fn library_declaration() -> Result<()> {
             library_declaration,
             Some(Statement::LibraryDefinition(
                 LibraryDefinition(
-                    library_name!("foo").into(),
+                    library_name!("foo"),
                     vec![LibraryDeclaration::ImportDeclaration(
                         ImportDeclaration(vec![ImportSetBody::Direct(
                             library_name!("a", "b").no_locate()
@@ -2346,7 +2337,7 @@ fn library_declaration() -> Result<()> {
             library_declaration,
             Some(Statement::LibraryDefinition(
                 LibraryDefinition(
-                    library_name!("foo").into(),
+                    library_name!("foo"),
                     vec![LibraryDeclaration::Export(vec![
                         ExportSpec::Direct("a".to_string()).no_locate(),
                         ExportSpec::Direct("b".to_string()).no_locate()
@@ -2380,7 +2371,7 @@ fn library_declaration() -> Result<()> {
             library_declaration,
             Some(Statement::LibraryDefinition(
                 LibraryDefinition(
-                    library_name!("foo").into(),
+                    library_name!("foo"),
                     vec![LibraryDeclaration::Begin(vec![Statement::Definition(
                         DefinitionBody(
                             "s".to_string(),
@@ -2467,7 +2458,7 @@ fn library() {
             ast,
             Ok(Some(Statement::LibraryDefinition(
                 LibraryDefinition(
-                    library_name!("lib-a", 0, "base").into(),
+                    library_name!("lib-a", 0, "base"),
                     vec![
                         LibraryDeclaration::ImportDeclaration(
                             ImportDeclaration(vec![ImportSetBody::Direct(

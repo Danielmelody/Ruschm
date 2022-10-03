@@ -8,7 +8,7 @@ use super::{error::SyntaxError, Primitive, Result};
 
 pub type Token = Located<TokenData>;
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TokenData {
     Identifier(String),
     Primitive(Primitive),
@@ -49,7 +49,7 @@ impl<CharIter: Iterator<Item = char>> Iterator for Lexer<CharIter> {
 }
 
 fn is_identifier_initial(c: char) -> bool {
-    match c {
+    matches!( c,
         'a'..='z'
         | 'A'..='Z'
         | '!'
@@ -66,9 +66,7 @@ fn is_identifier_initial(c: char) -> bool {
         | '@'
         | '^'
         | '_'
-        | '~' => true,
-        _ => false,
-    }
+        | '~')
 }
 
 impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
@@ -99,32 +97,23 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
                         '\\' => match self.advance(1).take() {
                             Some(cnn) => Ok(Some(TokenData::Primitive(Primitive::Character(cnn)))),
                             None => {
-                                return located_error!(
-                                    SyntaxError::UnexpectedEnd,
-                                    Some(self.location)
-                                )
+                                located_error!(SyntaxError::UnexpectedEnd, Some(self.location))
                             }
                         },
                         'u' => {
                             if Some('8') == self.advance(1).take()
                                 && Some('(') == self.advance(1).take()
                             {
-                                return Ok(Some(TokenData::ByteVecConsIntro));
+                                Ok(Some(TokenData::ByteVecConsIntro))
                             } else {
-                                return located_error!(
-                                    SyntaxError::UnrecognizedToken,
-                                    Some(self.location)
-                                );
+                                located_error!(SyntaxError::UnrecognizedToken, Some(self.location))
                             }
                         }
                         _ => {
-                            return located_error!(
-                                SyntaxError::UnrecognizedToken,
-                                Some(self.location)
-                            )
+                            located_error!(SyntaxError::UnrecognizedToken, Some(self.location))
                         }
                     },
-                    None => return located_error!(SyntaxError::UnexpectedEnd, Some(self.location)),
+                    None => located_error!(SyntaxError::UnexpectedEnd, Some(self.location)),
                 },
                 '\'' => Ok(Some(TokenData::Quote)),
                 '`' => Ok(Some(TokenData::Quasiquote)),
@@ -181,7 +170,7 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
         match c {
             ' ' | '\t' | '\n' | '\r' | '(' | ')' | '"' | ';' | '|' => Ok(()),
             other => {
-                return located_error!(
+                located_error!(
                     SyntaxError::ExpectSomething("delimiter".to_string(), other.to_string()),
                     location
                 )
@@ -218,20 +207,16 @@ impl<CharIter: Iterator<Item = char>> Lexer<CharIter> {
             Some(c) => {
                 let mut identifier_str = String::new();
                 identifier_str.push(c);
-                loop {
-                    if let Some(nc) = self.peekable_char_stream.peek() {
-                        match nc {
-                            _ if is_identifier_initial(*nc) => identifier_str.push(*nc),
-                            '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(*nc),
-                            _ => {
-                                Self::test_delimiter(Some(self.location), *nc)?;
-                                break;
-                            }
+                while let Some(nc) = self.peekable_char_stream.peek() {
+                    match nc {
+                        _ if is_identifier_initial(*nc) => identifier_str.push(*nc),
+                        '0'..='9' | '+' | '-' | '.' | '@' => identifier_str.push(*nc),
+                        _ => {
+                            Self::test_delimiter(Some(self.location), *nc)?;
+                            break;
                         }
-                        self.advance(1);
-                    } else {
-                        break;
                     }
+                    self.advance(1);
                 }
                 Ok(Some(TokenData::Identifier(identifier_str)))
             }

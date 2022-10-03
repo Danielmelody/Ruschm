@@ -8,6 +8,7 @@ pub use lexer::*;
 mod macros;
 pub use macros::*;
 #[macro_use]
+#[allow(clippy::module_inception)]
 mod parser;
 pub use parser::*;
 mod datum;

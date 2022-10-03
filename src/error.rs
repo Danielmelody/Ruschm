@@ -111,12 +111,12 @@ pub(crate) fn convert_located<T>(datas: Vec<T>) -> Vec<Located<T>> {
 
 macro_rules! error {
     ($arg:expr) => {
-        Err(ErrorData::from($arg).no_locate());
+        Err(ErrorData::from($arg).no_locate())
     };
 }
 
 macro_rules! located_error {
     ($arg:expr, $loc:expr) => {
-        Err(ErrorData::from($arg).locate($loc));
+        Err(ErrorData::from($arg).locate($loc))
     };
 }
